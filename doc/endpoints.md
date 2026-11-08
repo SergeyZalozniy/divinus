@@ -151,6 +151,11 @@ Configures the H.26x MP4 stream.
 | GET    | `h265`     | Use H.265 instead of H.264                 |
 | GET    | `mode`     | Compression mode (CBR, VBR, QP, ABR, AVBR) |
 | GET    | `profile`  | Profile (BP/BASELINE, MP/MAIN, HP/HIGH)    |
+| GET    | `intra_refresh` | Enable/disable intra refresh (GDR)    |
+| GET    | `intra_refresh_mode` | Refresh sweep (row, column)      |
+| GET    | `intra_refresh_num` | Rows or columns refreshed per frame |
+| GET    | `intra_refresh_qp` | QP of requested I-frames (0-51)    |
+| GET    | `ip_qp_delta` | I/P QP delta (-10 to 30, auto)          |
 
 **Response**
 ```json
@@ -159,10 +164,16 @@ Configures the H.26x MP4 stream.
   "width": 1280,
   "height": 720,
   "fps": 30,
+  "gop": 30,
   "h265": false,
   "mode": "VBR",
   "profile": "MP",
-  "bitrate": 2000000
+  "bitrate": 2000000,
+  "intra_refresh": false,
+  "intra_refresh_mode": "row",
+  "intra_refresh_num": 1,
+  "intra_refresh_qp": 0,
+  "ip_qp_delta": "auto"
 }
 ```
 

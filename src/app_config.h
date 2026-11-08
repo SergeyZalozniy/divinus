@@ -99,6 +99,7 @@ struct AppConfig {
     unsigned int mp4_intraRefreshMode;
     unsigned int mp4_intraRefreshNum;
     unsigned int mp4_intraRefreshQp;
+    int mp4_ipQpDelta;
 
     // [jpeg]
     bool jpeg_enable;

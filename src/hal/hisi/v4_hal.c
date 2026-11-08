@@ -595,6 +595,18 @@ int v4_sensor_init(char *name, char *obj)
     return EXIT_SUCCESS;
 }
 
+/* QP delta between I and P frames (-10 to 30). Automatic: gop / fps as
+ * before, but 0 with intra refresh, where the GOP start is not a keyframe
+ * and a lower QP there only inflates that one frame. */
+static int v4_video_ipqpdelta(hal_vidconfig *config)
+{
+    int delta = config->ipQpDelta;
+    if (delta == HAL_IPQPDELTA_AUTO)
+        delta = config->intraRefresh ? 0 :
+            config->gop / (config->framerate ? config->framerate : 1);
+    return MAX(-10, MIN(delta, 30));
+}
+
 int v4_video_create(char index, hal_vidconfig *config)
 {
     int ret;
@@ -623,7 +635,7 @@ int v4_video_create(char index, hal_vidconfig *config)
         }
     } else if (config->codec == HAL_VIDCODEC_H265) {
         channel.attrib.codec = V4_VENC_CODEC_H265;
-        channel.gop.normalP.ipQualDelta = config->gop / config->framerate;
+        channel.gop.normalP.ipQualDelta = v4_video_ipqpdelta(config);
         switch (config->mode) {
             case HAL_VIDMODE_CBR:
                 channel.rate.mode = V4_VENC_RATEMODE_H265CBR;
@@ -650,7 +662,7 @@ int v4_video_create(char index, hal_vidconfig *config)
         }
     } else if (config->codec == HAL_VIDCODEC_H264) {
         channel.attrib.codec = V4_VENC_CODEC_H264;
-        channel.gop.normalP.ipQualDelta = config->gop / config->framerate;
+        channel.gop.normalP.ipQualDelta = v4_video_ipqpdelta(config);
         switch (config->mode) {
             case HAL_VIDMODE_CBR:
                 channel.rate.mode = V4_VENC_RATEMODE_H264CBR;

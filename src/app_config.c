@@ -178,6 +178,10 @@ int app_config_save(void) {
     fprintf(file, "  intra_refresh_mode: %s\n", app_config.mp4_intraRefreshMode ? "column" : "row");
     fprintf(file, "  intra_refresh_num: %d\n", app_config.mp4_intraRefreshNum);
     fprintf(file, "  intra_refresh_qp: %d\n", app_config.mp4_intraRefreshQp);
+    if (app_config.mp4_ipQpDelta == HAL_IPQPDELTA_AUTO)
+        fprintf(file, "  ip_qp_delta: auto\n");
+    else
+        fprintf(file, "  ip_qp_delta: %d\n", app_config.mp4_ipQpDelta);
 
     fprintf(file, "osd:\n");
     fprintf(file, "  enable: %s\n", app_config.osd_enable ? "true" : "false");
@@ -230,6 +234,20 @@ int app_config_save(void) {
     return EXIT_SUCCESS;
 }
 
+/* "auto" (the default) or a fixed QP delta between I and P frames */
+static void parse_ipqpdelta(struct IniConfig *ini, const char *section, int *value) {
+    char str[16] = {0};
+    if (parse_param_value_n(ini, section, "ip_qp_delta", str, sizeof(str)) != CONFIG_OK)
+        return;
+    if (EQUALS_CASE(str, "auto")) {
+        *value = HAL_IPQPDELTA_AUTO;
+        return;
+    }
+    int val;
+    if (parse_int(ini, section, "ip_qp_delta", -10, 30, &val) == CONFIG_OK)
+        *value = val;
+}
+
 enum ConfigError app_config_parse(void) {
     memset(&app_config, 0, sizeof(struct AppConfig));
 
@@ -280,6 +298,7 @@ enum ConfigError app_config_parse(void) {
     app_config.mp4_intraRefreshMode = HAL_IREFMODE_ROW;
     app_config.mp4_intraRefreshNum = 1;
     app_config.mp4_intraRefreshQp = 0;
+    app_config.mp4_ipQpDelta = HAL_IPQPDELTA_AUTO;
 
     app_config.mjpeg_enable = false;
     app_config.mjpeg_fps = 15;
@@ -564,7 +583,7 @@ enum ConfigError app_config_parse(void) {
         if (err != CONFIG_OK)
             goto RET_ERR;
         app_config.mp4_gop = app_config.mp4_fps;
-        parse_int(&ini, "mp4", "gop", 1, INT_MAX, &app_config.mp4_gop);
+        parse_int(&ini, "mp4", "gop", 1, USHRT_MAX, &app_config.mp4_gop);
         {
             const char *possible_values[] = {"BP", "MP", "HP"};
             const int count = sizeof(possible_values) / sizeof(const char *);
@@ -597,6 +616,7 @@ enum ConfigError app_config_parse(void) {
             &app_config.mp4_intraRefreshNum);
         parse_int(&ini, "mp4", "intra_refresh_qp", 0, 51,
             &app_config.mp4_intraRefreshQp);
+        parse_ipqpdelta(&ini, "mp4", &app_config.mp4_ipQpDelta);
     }
 
     err = parse_bool(&ini, "jpeg", "enable", &app_config.jpeg_enable);

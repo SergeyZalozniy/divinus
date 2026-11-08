@@ -767,6 +767,7 @@ int media_mp4_enable(void) {
         config.intraRefreshMode = app_config.mp4_intraRefreshMode;
         config.intraRefreshNum = app_config.mp4_intraRefreshNum;
         config.intraRefreshQp = app_config.mp4_intraRefreshQp;
+        config.ipQpDelta = app_config.mp4_ipQpDelta;
 
         switch (plat) {
 #if defined(__ARM_PCS_VFP)

@@ -61,6 +61,8 @@ typedef enum {
     HAL_IREFMODE_COLUMN
 } hal_irefmode;
 
+#define HAL_IPQPDELTA_AUTO -128
+
 typedef enum {
     HAL_LIGHT_NONE  = 0,
     HAL_LIGHT_IR    = 1 << 0,
@@ -107,11 +109,14 @@ typedef struct {
     hal_vidcodec codec;
     hal_vidmode mode;
     hal_vidprofile profile;
-    unsigned char gop, framerate, minQual, maxQual;
+    unsigned short gop;
+    unsigned char framerate, minQual, maxQual;
     unsigned short bitrate, maxBitrate;
     char intraRefresh;
     hal_irefmode intraRefreshMode;
     unsigned int intraRefreshNum, intraRefreshQp;
+    // I/P QP delta, HAL_IPQPDELTA_AUTO lets the HAL pick it
+    int ipQpDelta;
 } hal_vidconfig;
 
 typedef struct {
