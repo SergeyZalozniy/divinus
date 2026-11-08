@@ -1047,8 +1047,16 @@ int sdk_start(void) {
     }
 
 #if defined(__arm__) && !defined(__ARM_PCS_VFP)
-    if (plat == HAL_PLATFORM_V4 && app_config.sub_enable)
-        v4_system_reserve(app_config.sub_width, app_config.sub_height);
+    /* Own VB blocks for the scaled channels, so they never wait for the
+       full-size blocks the main pipeline keeps busy */
+    if (plat == HAL_PLATFORM_V4) {
+        if (app_config.sub_enable)
+            v4_system_reserve(app_config.sub_width, app_config.sub_height, 3);
+        if (app_config.jpeg_enable)
+            v4_system_reserve(app_config.jpeg_width, app_config.jpeg_height, 2);
+        if (app_config.mjpeg_enable)
+            v4_system_reserve(app_config.mjpeg_width, app_config.mjpeg_height, 3);
+    }
 #endif
 
     switch (plat) {

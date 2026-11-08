@@ -30,9 +30,13 @@ char _v4_vi_pipe = 0;
 char _v4_vpss_chn = 0;
 char _v4_vpss_grp = 0;
 
-/* Extra video buffer pool for a scaled-down channel (sub stream) */
-static short _v4_vb_extra_width = 0;
-static short _v4_vb_extra_height = 0;
+/* Extra video buffer pools for scaled channels (sub stream, JPEG/MJPEG) */
+#define V4_VB_EXTRA_MAX 4
+static struct {
+    short width, height;
+    unsigned int count;
+} _v4_vb_extra[V4_VB_EXTRA_MAX];
+static int _v4_vb_extra_num = 0;
 
 void v4_hal_deinit(void)
 {
@@ -829,17 +833,37 @@ int v4_video_snapshot_grab(char index, hal_jpegdata *jpeg)
     memset(&stat, 0, sizeof(stat));
     memset(&strm, 0, sizeof(strm));
 
-    if (ret = v4_channel_bind(index)) {
-        HAL_DANGER("v4_venc", "Binding the encoder channel "
+    /* Same order as the persistent channels (sub stream): the encoder
+       starts receiving first, then the VPSS channel is enabled and bound */
+    int count = 1;
+    ret = v4_venc.fnStartReceivingEx(index, &count);
+    HAL_INFO("v4_venc", "Snapshot %d: StartRecvFrame(1) rc %#x\n", index, ret);
+    if (ret) {
+        HAL_DANGER("v4_venc", "Requesting one frame "
             "%d failed with %#x!\n", index, ret);
         goto finish;
     }
 
-    unsigned int count = 1;
-    if (ret = v4_venc.fnStartReceivingEx(index, &count)) {
-        HAL_DANGER("v4_venc", "Requesting one frame "
+    ret = v4_vpss.fnEnableChannel(_v4_vpss_grp, index);
+    HAL_INFO("v4_venc", "Snapshot %d: VPSS_EnableChn rc %#x\n", index, ret);
+    if (ret) {
+        HAL_DANGER("v4_venc", "Enabling the VPSS channel "
             "%d failed with %#x!\n", index, ret);
         goto finish;
+    }
+
+    {
+        v4_sys_bind source = { .module = V4_SYS_MOD_VPSS,
+            .device = _v4_vpss_grp, .channel = index };
+        v4_sys_bind dest = { .module = V4_SYS_MOD_VENC,
+            .device = _v4_venc_dev, .channel = index };
+        ret = v4_sys.fnBind(&source, &dest);
+        HAL_INFO("v4_venc", "Snapshot %d: SYS_Bind rc %#x\n", index, ret);
+        if (ret) {
+            HAL_DANGER("v4_venc", "Binding the encoder channel "
+                "%d failed with %#x!\n", index, ret);
+            goto finish;
+        }
     }
 
     int fd = v4_venc.fnGetDescriptor(index);
@@ -854,6 +878,13 @@ int v4_video_snapshot_grab(char index, hal_jpegdata *jpeg)
         ret = EXIT_FAILURE;
         goto finish;
     } else if (ret == 0) {
+        /* Tells "no frame reached the encoder" (leftRecvPics still 1)
+           from "frame received but not encoded" */
+        int qret = v4_venc.fnQuery(index, &stat);
+        HAL_INFO("v4_venc", "Snapshot %d: no stream in 2 s, Query rc %#x, "
+            "leftPics %u, leftRecvPics %u, leftEncPics %u, curPacks %u\n",
+            index, qret, stat.leftPics, stat.leftRecvPics,
+            stat.leftEncPics, stat.curPacks);
         HAL_DANGER("v4_venc", "Capture stream timed out!\n");
         ret = EXIT_FAILURE;
         goto finish;
@@ -885,7 +916,10 @@ int v4_video_snapshot_grab(char index, hal_jpegdata *jpeg)
         }
         strm.count = stat.curPacks;
 
-        if (ret = v4_venc.fnGetStream(index, &strm, stat.curPacks)) {
+        ret = v4_venc.fnGetStream(index, &strm, stat.curPacks);
+        HAL_INFO("v4_venc", "Snapshot %d: GetStream rc %#x, %u packs\n",
+            index, ret, stat.curPacks);
+        if (ret) {
             HAL_DANGER("v4_venc", "Getting the stream on "
                 "channel %d failed with %#x!\n", index, ret);
             if (stat.curPacks > 8) free(strm.packet);
@@ -1088,14 +1122,28 @@ int v4_system_init(char *snrConfig)
             v4_config.isp.size.width, v4_config.isp.size.height,
             V4_PIXFMT_YVU420SP, 8);
         pool.comm[1].blockCnt = 2;
-        /* Smaller frames get blocks from the best fitting pool, so a
-           scaled channel does not eat the two full-size ones */
-        if (_v4_vb_extra_width && _v4_vb_extra_height) {
-            pool.comm[2].blockSize = v4_buffer_calculate_venc(
-                _v4_vb_extra_width, _v4_vb_extra_height, V4_PIXFMT_YVU420SP, 8);
-            pool.comm[2].blockCnt = 3;
-            pool.count = 3;
+        /* Smaller frames get blocks from the best fitting pool, so the
+           scaled channels do not wait for the full-size ones (both
+           full-size pools run down to 0 free blocks with the main stream
+           alone). Equal sizes share one pool, a reservation as large as
+           the capture adds its blocks to the full-size YUV pool. */
+        for (int i = 0; i < _v4_vb_extra_num; i++) {
+            unsigned long long size = v4_buffer_calculate_venc(
+                _v4_vb_extra[i].width, _v4_vb_extra[i].height,
+                V4_PIXFMT_YVU420SP, 8);
+            unsigned int p;
+            if (size >= pool.comm[1].blockSize) p = 1;
+            else for (p = 2; p < pool.count; p++)
+                if (pool.comm[p].blockSize == size) break;
+            if (p == pool.count) {
+                pool.comm[p].blockSize = size;
+                pool.count++;
+            }
+            pool.comm[p].blockCnt += _v4_vb_extra[i].count;
         }
+        for (unsigned int i = 0; i < pool.count; i++)
+            HAL_INFO("v4_sys", "VB pool %u: %u blocks of %llu bytes\n",
+                i, pool.comm[i].blockCnt, pool.comm[i].blockSize);
 
         if (ret = v4_vb.fnConfigPool(&pool))
             return ret;
@@ -1109,10 +1157,20 @@ int v4_system_init(char *snrConfig)
     return EXIT_SUCCESS;
 }
 
-void v4_system_reserve(short width, short height)
+/* Before v4_system_init: a scaled channel of this size will run, so give
+ * it its own blocks (count = frames it may hold at once) */
+void v4_system_reserve(short width, short height, unsigned int count)
 {
-    _v4_vb_extra_width = width;
-    _v4_vb_extra_height = height;
+    if (!width || !height || !count) return;
+    if (_v4_vb_extra_num >= V4_VB_EXTRA_MAX) {
+        HAL_WARNING("v4_sys", "Too many buffer reservations, "
+            "ignoring %dx%d!\n", width, height);
+        return;
+    }
+    _v4_vb_extra[_v4_vb_extra_num].width = width;
+    _v4_vb_extra[_v4_vb_extra_num].height = height;
+    _v4_vb_extra[_v4_vb_extra_num].count = count;
+    _v4_vb_extra_num++;
 }
 
 float v4_system_readtemp(void)
