@@ -802,18 +802,22 @@ void v4_video_request_idr(char index)
 int v4_video_snapshot_grab(char index, hal_jpegdata *jpeg)
 {
     int ret;
+    v4_venc_stat stat;
+    v4_venc_strm strm;
+    memset(&stat, 0, sizeof(stat));
+    memset(&strm, 0, sizeof(strm));
 
     if (ret = v4_channel_bind(index)) {
         HAL_DANGER("v4_venc", "Binding the encoder channel "
             "%d failed with %#x!\n", index, ret);
-        goto abort;
+        goto finish;
     }
 
     unsigned int count = 1;
     if (ret = v4_venc.fnStartReceivingEx(index, &count)) {
         HAL_DANGER("v4_venc", "Requesting one frame "
             "%d failed with %#x!\n", index, ret);
-        goto abort;
+        goto finish;
     }
 
     int fd = v4_venc.fnGetDescriptor(index);
@@ -825,27 +829,27 @@ int v4_video_snapshot_grab(char index, hal_jpegdata *jpeg)
     ret = select(fd + 1, &readFds, NULL, NULL, &timeout);
     if (ret < 0) {
         HAL_DANGER("v4_venc", "Select operation failed!\n");
-        goto abort;
+        ret = EXIT_FAILURE;
+        goto finish;
     } else if (ret == 0) {
         HAL_DANGER("v4_venc", "Capture stream timed out!\n");
-        goto abort;
+        ret = EXIT_FAILURE;
+        goto finish;
     }
 
     if (FD_ISSET(fd, &readFds)) {
-        v4_venc_stat stat;
         if (ret = v4_venc.fnQuery(index, &stat)) {
             HAL_DANGER("v4_venc", "Querying the encoder channel "
                 "%d failed with %#x!\n", index, ret);
-            goto abort;
+            goto finish;
         }
 
         if (!stat.curPacks) {
             HAL_DANGER("v4_venc", "Current frame is empty, skipping it!\n");
-            goto abort;
+            ret = EXIT_FAILURE;
+            goto finish;
         }
 
-        v4_venc_strm strm;
-        memset(&strm, 0, sizeof(strm));
         v4_venc_pack packs[8];
         if (stat.curPacks > 8)
             strm.packet = (v4_venc_pack*)malloc(sizeof(v4_venc_pack) * stat.curPacks);
@@ -854,7 +858,8 @@ int v4_video_snapshot_grab(char index, hal_jpegdata *jpeg)
 
         if (!strm.packet) {
             HAL_DANGER("v4_venc", "Memory allocation on channel %d failed!\n", index);
-            goto abort;
+            ret = EXIT_FAILURE;
+            goto finish;
         }
         strm.count = stat.curPacks;
 
@@ -863,7 +868,7 @@ int v4_video_snapshot_grab(char index, hal_jpegdata *jpeg)
                 "channel %d failed with %#x!\n", index, ret);
             if (stat.curPacks > 8) free(strm.packet);
             strm.packet = NULL;
-            goto abort;
+            goto finish;
         }
 
         {
@@ -883,11 +888,11 @@ int v4_video_snapshot_grab(char index, hal_jpegdata *jpeg)
             }
         }
 
-abort:
         v4_venc.fnFreeStream(index, &strm);
         if (stat.curPacks > 8) free(strm.packet);
     }
 
+finish:
     v4_venc.fnFreeDescriptor(index);
 
     v4_venc.fnStopReceiving(index);

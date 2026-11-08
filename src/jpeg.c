@@ -31,8 +31,10 @@ int jpeg_init() {
 
     {
         hal_vidconfig config;
+        memset(&config, 0, sizeof(config));
         config.width = app_config.jpeg_width;
         config.height = app_config.jpeg_height;
+        config.framerate = 1;
         config.codec = HAL_VIDCODEC_JPG;
         config.mode = HAL_VIDMODE_QP;
         config.minQual = config.maxQual = app_config.jpeg_qfactor;

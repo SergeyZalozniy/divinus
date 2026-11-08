@@ -427,8 +427,12 @@ int create_channel(char index, short width, short height, char framerate, char j
             app_config.mirror, app_config.flip, framerate);
         case HAL_PLATFORM_V3:  return v3_channel_create(index, width, height,
             app_config.mirror, app_config.flip, framerate);
-        case HAL_PLATFORM_V4:  return v4_channel_create(index, app_config.mirror,
-            app_config.flip, framerate);
+        /* The encoders take the capture size, the JPEG/MJPEG ones get a
+           channel scaled to their own size (as on the other platforms) */
+        case HAL_PLATFORM_V4:  return jpeg ?
+            v4_channel_create_scaled(index, width, height, app_config.mirror,
+                app_config.flip, framerate) :
+            v4_channel_create(index, app_config.mirror, app_config.flip, framerate);
         #if __ARM_ARCH == 6
         case HAL_PLATFORM_F1:  return f1_channel_create(index, width, height, framerate, jpeg);
         case HAL_PLATFORM_F2:  return f2_channel_create(index, width, height, framerate, jpeg);
