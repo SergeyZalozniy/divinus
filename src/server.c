@@ -51,7 +51,11 @@ const http_error_t http_errors[] = {
     {500, "Internal Server Error", "An invalid operation was caught on this request."},
     {501, "Not Implemented", "The server does not support the functionality."}
 };
-http_header_t http_headers[17] = {{"\0", "\0"}};
+/* Headers of the request being handled: they point into its input buffer,
+   which is freed once it has been answered, so parse_request() clears the
+   whole table first. The last entry always stays NULL as the terminator. */
+#define HTTP_MAX_HEADERS 16
+http_header_t http_headers[HTTP_MAX_HEADERS + 1];
 
 int server_fd = -1;
 pthread_t server_thread_id;
@@ -509,7 +513,7 @@ void send_html(const int fd, const char *data) {
 
 char *request_header(const char *name) {
     http_header_t *h = http_headers;
-    for (; h->name; h++)
+    for (; h < http_headers + HTTP_MAX_HEADERS && h->name; h++)
         if (!strcasecmp(h->name, name))
             return h->value;
     return NULL;
@@ -518,6 +522,15 @@ char *request_header(const char *name) {
 http_header_t *request_headers(void) { return http_headers; }
 
 void parse_request(http_request_t *req) {
+    /* Forget the previous request's headers before anything else: they
+       point into its input buffer, freed after it was answered. Left in
+       place, a request with fewer headers (a bare "GET / HTTP/1.0") made
+       request_header("Authorization") read freed memory, a SIGSEGV once
+       musl's mallocng had unmapped that buffer */
+    memset(http_headers, 0, sizeof(http_headers));
+    req->method = req->uri = req->prot = req->query = NULL;
+    req->payload = NULL;
+
     struct sockaddr_in client_sock;
     socklen_t client_sock_len = sizeof(client_sock);
     memset(&client_sock, 0, client_sock_len);
@@ -535,7 +548,11 @@ void parse_request(http_request_t *req) {
     }
 
 grant_access:
-    if (req->total <= 0) return;
+    if (req->total <= 0) {
+        close_socket_fd(req->clntFd);
+        req->clntFd = -1;
+        return;
+    }
 
     req->input[req->total] = '\0';
     char *state = NULL;
@@ -564,8 +581,9 @@ grant_access:
         return;
     }
 
+    char *hdr_end = req->input + req->header_len;
     http_header_t *h = http_headers;
-    while (h < http_headers + 16) {
+    while (h < http_headers + HTTP_MAX_HEADERS) {
         char *k, *v, *e;
         if (!(k = strtok_r(NULL, "\r\n: \t", &state)))
             break;
@@ -577,9 +595,9 @@ grant_access:
 #ifdef DEBUG_HTTP
         fprintf(stderr, "         (H) %s: %s\n", k, v);
 #endif
-        if (state >= req->input + req->header_len) break;
+        if (!state || state >= hdr_end) break;
         e = v + 1 + strlen(v);
-        if (e[1] == '\r' && e[2] == '\n')
+        if (e + 2 >= hdr_end || (e[1] == '\r' && e[2] == '\n'))
             break;
     }
 
@@ -1911,6 +1929,7 @@ void *server_thread(void *vargp) {
                             while (cl < hdr_end) {
                                 if (!strncasecmp(cl, "Content-Length:", 15)) {
                                     req->paysize = atoi(cl + 15);
+                                    if (req->paysize < 0) req->paysize = 0;
                                     break;
                                 }
                                 cl = strchr(cl, '\n');
