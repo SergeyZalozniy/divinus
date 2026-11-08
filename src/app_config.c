@@ -4,6 +4,21 @@ const char *appconf_paths[] = {"./divinus.yaml", "/etc/divinus.yaml", NULL};
 
 struct AppConfig app_config;
 
+/* Config file that app_config_save() replaced in this run, its previous
+ * content being kept as <path>.bak; empty while nothing was saved */
+static char app_config_saved[PATH_MAX];
+
+static void app_config_backup(const char *conf_path) {
+    /* A later save in the same run keeps the original as the backup */
+    if (EQUALS(app_config_saved, conf_path)) return;
+
+    char bak_path[PATH_MAX + 8];
+    snprintf(bak_path, sizeof(bak_path), "%s.bak", conf_path);
+    remove(bak_path);
+    if (!rename(conf_path, bak_path))
+        snprintf(app_config_saved, sizeof(app_config_saved), "%s", conf_path);
+}
+
 static inline void app_config_open(FILE **file, const char *flags) {
     const char **path = appconf_paths;
     char conf_path[PATH_MAX], exe_path[PATH_MAX];
@@ -15,12 +30,8 @@ static inline void app_config_open(FILE **file, const char *flags) {
         exe_path[exe_len] = '\0';
         snprintf(conf_path, sizeof(conf_path), "%s/divinus.yaml", dir);
         if (!access(conf_path, F_OK)) {
-            if (*flags == 'w') {
-                char bak_path[PATH_MAX];
-                sprintf(bak_path, "%s.bak", conf_path);
-                remove(bak_path);
-                rename(conf_path, bak_path);
-            }
+            if (*flags == 'w')
+                app_config_backup(conf_path);
             *file = fopen(conf_path, flags);
             return;
         }
@@ -28,43 +39,26 @@ static inline void app_config_open(FILE **file, const char *flags) {
 
     while (*path) {
         if (access(*path++, F_OK)) continue;
-        if (*flags == 'w') {
-            char bak_path[PATH_MAX];
-            sprintf(bak_path, "%s.bak", *(path - 1));
-            remove(bak_path);
-            rename(*(path - 1), bak_path);
-        }
+        if (*flags == 'w')
+            app_config_backup(*(path - 1));
         *file = fopen(*(path - 1), flags);
         break;
     }
 }
 
+/* Undoes this run's app_config_save(), if any, by putting the .bak it
+ * made back in place. A .bak left by an earlier run or by someone else is
+ * never touched, so a config edited while divinus was stopped survives. */
 void app_config_restore(void) {
-    char conf_path[PATH_MAX], exe_path[PATH_MAX];
+    if (!*app_config_saved) return;
 
-    ssize_t exe_len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
-    if (exe_len != -1) {
-        char bak_path[PATH_MAX], *dir = dirname(exe_path);
-        exe_path[exe_len] = '\0';
-        snprintf(conf_path, sizeof(conf_path), "%s/divinus.yaml", dir);
-        sprintf(bak_path, "%s.bak", conf_path);
-        if (!access(bak_path, F_OK)) {
-            remove(conf_path);
-            rename(bak_path, conf_path);
-            return;
-        }
+    char bak_path[PATH_MAX + 8];
+    snprintf(bak_path, sizeof(bak_path), "%s.bak", app_config_saved);
+    if (!access(bak_path, F_OK)) {
+        remove(app_config_saved);
+        rename(bak_path, app_config_saved);
     }
-
-    const char **path = appconf_paths;
-    while (*path) {
-        char bak_path[PATH_MAX];
-        sprintf(bak_path, "%s.bak", *path);
-        if (!access(bak_path, F_OK)) {
-            remove(*path);
-            rename(bak_path, *path);
-        }
-        path++;
-    }
+    *app_config_saved = '\0';
 }
 
 int app_config_save(void) {
