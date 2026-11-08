@@ -89,6 +89,17 @@ mp4:
   bitrate: 1024
   profile: 2
 
+sub:
+  enable: false
+  codec: H264
+  mode: CBR
+  width: 640
+  height: 360
+  fps: 20
+  gop: 40
+  bitrate: 512
+  profile: 1
+
 jpeg:
   enable: false
   width: 1920

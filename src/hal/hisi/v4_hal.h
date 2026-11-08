@@ -34,6 +34,8 @@ int v4_audio_init(int samplerate);
 
 int v4_channel_bind(char index);
 int v4_channel_create(char index, char mirror, char flip, char framerate);
+int v4_channel_create_scaled(char index, short width, short height,
+    char mirror, char flip, char framerate);
 int v4_channel_grayscale(char enable);
 int v4_channel_unbind(char index);
 
@@ -62,6 +64,7 @@ int v4_system_calculate_block(short width, short height, v4_common_pixfmt pixFmt
     unsigned int alignWidth);
 void v4_system_deinit(void);
 int v4_system_init(char *snrConfig);
+void v4_system_reserve(short width, short height);
 float v4_system_readtemp(void);
 
 int v4_system_identify(void);

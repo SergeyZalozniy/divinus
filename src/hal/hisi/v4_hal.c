@@ -30,6 +30,10 @@ char _v4_vi_pipe = 0;
 char _v4_vpss_chn = 0;
 char _v4_vpss_grp = 0;
 
+/* Extra video buffer pool for a scaled-down channel (sub stream) */
+static short _v4_vb_extra_width = 0;
+static short _v4_vb_extra_height = 0;
+
 void v4_hal_deinit(void)
 {
     v4_vpss_unload(&v4_vpss);
@@ -156,13 +160,22 @@ int v4_channel_bind(char index)
 
 int v4_channel_create(char index, char mirror, char flip, char framerate)
 {
+    return v4_channel_create_scaled(index, v4_config.isp.capt.width,
+        v4_config.isp.capt.height, mirror, flip, framerate);
+}
+
+/* VPSS channel scaling the capture to the given size, e.g. for a sub stream
+ * whose encoder then gets frames of exactly its own size */
+int v4_channel_create_scaled(char index, short width, short height,
+    char mirror, char flip, char framerate)
+{
     int ret;
 
     {
         v4_vpss_chn channel;
         memset(&channel, 0, sizeof(channel));
-        channel.dest.width = v4_config.isp.capt.width;
-        channel.dest.height = v4_config.isp.capt.height;
+        channel.dest.width = width;
+        channel.dest.height = height;
         channel.pixFmt = V4_PIXFMT_YVU420SP;
         channel.hdr = V4_HDR_SDR8;
         channel.srcFps = v4_config.isp.framerate;
@@ -178,19 +191,23 @@ int v4_channel_create(char index, char mirror, char flip, char framerate)
 
 int v4_channel_grayscale(char enable)
 {
-    int ret;
+    int ret, result = EXIT_SUCCESS;
 
+    /* Keep going on errors so one odd channel does not leave the
+       following ones (e.g. a sub stream) in colour */
     for (char i = 0; i < V4_VENC_CHN_NUM; i++) {
         v4_venc_para param;
         if (!v4_state[i].enable) continue;
-        if (ret = v4_venc.fnGetChannelParam(i, &param))
-            return ret;
+        if (ret = v4_venc.fnGetChannelParam(i, &param)) {
+            result = ret;
+            continue;
+        }
         param.grayscaleOn = enable;
         if (ret = v4_venc.fnSetChannelParam(i, &param))
-            return ret;
+            result = ret;
     }
 
-    return EXIT_SUCCESS;
+    return result;
 }
 
 int v4_channel_unbind(char index)
@@ -728,6 +745,13 @@ int v4_video_create(char index, hal_vidconfig *config)
 
     v4_state[index].payload = config->codec;
 
+    /* Channels (re)created after the stream thread started need their
+       descriptor too, or the thread would wait on a stale one */
+    if (v4_state[(int)index].mainLoop && config->codec != HAL_VIDCODEC_JPG) {
+        int fd = v4_venc.fnGetDescriptor(index);
+        if (fd >= 0) v4_state[(int)index].fileDesc = fd;
+    }
+
     return EXIT_SUCCESS;
 }
 
@@ -899,10 +923,13 @@ void *v4_video_thread(void)
 
     while (keepRunning) {
         FD_ZERO(&readFds);
+        maxFd = 0;
         for(int i = 0; i < V4_VENC_CHN_NUM; i++) {
             if (!v4_state[i].enable) continue;
             if (!v4_state[i].mainLoop) continue;
             FD_SET(v4_state[i].fileDesc, &readFds);
+            if (maxFd <= v4_state[i].fileDesc)
+                maxFd = v4_state[i].fileDesc;
         }
 
         timeout.tv_sec = 2;
@@ -1034,6 +1061,14 @@ int v4_system_init(char *snrConfig)
             v4_config.isp.size.width, v4_config.isp.size.height,
             V4_PIXFMT_YVU420SP, 8);
         pool.comm[1].blockCnt = 2;
+        /* Smaller frames get blocks from the best fitting pool, so a
+           scaled channel does not eat the two full-size ones */
+        if (_v4_vb_extra_width && _v4_vb_extra_height) {
+            pool.comm[2].blockSize = v4_buffer_calculate_venc(
+                _v4_vb_extra_width, _v4_vb_extra_height, V4_PIXFMT_YVU420SP, 8);
+            pool.comm[2].blockCnt = 3;
+            pool.count = 3;
+        }
 
         if (ret = v4_vb.fnConfigPool(&pool))
             return ret;
@@ -1045,6 +1080,12 @@ int v4_system_init(char *snrConfig)
         return ret;
 
     return EXIT_SUCCESS;
+}
+
+void v4_system_reserve(short width, short height)
+{
+    _v4_vb_extra_width = width;
+    _v4_vb_extra_height = height;
 }
 
 float v4_system_readtemp(void)

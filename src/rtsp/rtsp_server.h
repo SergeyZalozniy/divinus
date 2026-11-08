@@ -15,6 +15,9 @@ extern "C" {
 #define SERVER_RTCP_PORT 5025
 #define RTSP_MAXIMUM_FRAMERATE 60
 #define RTSP_MAXIMUM_CONNECTIONS 16
+/* Video streams told apart by the request URL: 0 is the main stream, 1 the
+   sub stream ("/sub" or "stream=1" in the path) */
+#define RTSP_MAXIMUM_STREAMS 2
 
 #define STR_RTSP_VERSION "RTSP/1.0"
 
@@ -30,7 +33,7 @@ typedef struct __rtsp_obj_t *rtsp_handle;
 #include "../hal/types.h"
 
 void rtp_disable_audio(rtsp_handle h);
-int rtp_send_h26x(rtsp_handle h, hal_vidstream *stream, char isH265);
+int rtp_send_h26x(rtsp_handle h, int stream_id, hal_vidstream *stream, char isH265);
 int rtp_send_mp3(rtsp_handle h, unsigned char *buf, size_t len);
 int rtp_send_pcma(rtsp_handle h, unsigned char *buf, size_t len);
 int rtp_send_pcmu(rtsp_handle h, unsigned char *buf, size_t len);
@@ -40,6 +43,10 @@ extern void rtsp_finish(rtsp_handle h);
 extern rtsp_handle rtsp_create(unsigned char max_con, unsigned int port, int priority);
 
 extern void rtsp_configure_auth(rtsp_handle h, const char *user, const char *pass);
+
+/* Number of video streams served (1 by default, the URL path is then
+   ignored and every client gets stream 0) */
+extern void rtsp_configure_streams(rtsp_handle h, int count);
 
 extern int rtsp_tick(rtsp_handle h);
 

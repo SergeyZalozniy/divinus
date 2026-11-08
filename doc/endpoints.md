@@ -177,6 +177,10 @@ Configures the H.26x MP4 stream.
 }
 ```
 
+#### `/api/sub`
+
+Configures the H.26x sub stream (RTSP only), same parameters and response as `/api/mp4`. Enabling it at runtime works, but its video buffer pool is only sized at startup, so save and restart after changing its size.
+
 ### Audio Configuration
 
 #### `/api/audio`

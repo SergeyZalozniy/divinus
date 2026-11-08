@@ -1,6 +1,9 @@
 #include "media.h"
+#include "night.h"
 
 char audioOn = 0, udpOn = 0;
+/* Encoder channel of the sub stream, -1 while it is not running */
+static int subIndex = -1;
 pthread_mutex_t aencMtx, chnMtx, mp4Mtx;
 pthread_t aencPid = 0, audPid = 0, ispPid = 0, vidPid = 0;
 
@@ -187,6 +190,13 @@ int save_video_stream(char index, hal_vidstream *stream) {
         {
             char isH265 = chnState[index].payload == HAL_VIDCODEC_H265 ? 1 : 0;
 
+            /* The sub stream only feeds its own RTSP stream */
+            if (index == subIndex) {
+                if (app_config.rtsp_enable)
+                    rtp_send_h26x(rtspHandle, 1, stream, isH265);
+                break;
+            }
+
             if (app_config.mp4_enable) {
                 pthread_mutex_lock(&mp4Mtx);
                 send_mp4_to_client(index, stream, isH265);
@@ -196,7 +206,7 @@ int save_video_stream(char index, hal_vidstream *stream) {
                 send_h26x_to_client(index, stream);
             }
             if (app_config.rtsp_enable)
-                rtp_send_h26x(rtspHandle, stream, isH265);
+                rtp_send_h26x(rtspHandle, 0, stream, isH265);
 
             if (app_config.stream_enable) {
                 for (int i = 0; i < stream->count; i++) {
@@ -317,10 +327,18 @@ void media_stop(void) {
 }
 
 void request_idr(void) {
+    request_idr_stream(0);
+}
+
+/* Stream 0 is the main H.26x channel, stream 1 the sub stream */
+void request_idr_stream(int stream) {
     signed char index = -1;
     pthread_mutex_lock(&chnMtx);
-    for (int i = 0; i < chnCount; i++) {
+    if (stream == 1)
+        index = subIndex;
+    else for (int i = 0; i < chnCount; i++) {
         if (!chnState[i].enable) continue;
+        if (i == subIndex) continue;
         if (chnState[i].payload != HAL_VIDCODEC_H264 &&
             chnState[i].payload != HAL_VIDCODEC_H265) continue;
         index = i;
@@ -722,6 +740,7 @@ int media_mp4_disable(void) {
 
     for (char i = 0; i < chnCount; i++) {
         if (!chnState[i].enable) continue;
+        if (i == subIndex) continue;
         if (chnState[i].payload != HAL_VIDCODEC_H264 &&
             chnState[i].payload != HAL_VIDCODEC_H265) continue;
 
@@ -815,6 +834,102 @@ int media_mp4_enable(void) {
         HAL_ERROR("media", "Binding channel %d failed with %#x!\n%s\n",
             index, ret, errstr(ret));
     }
+
+    return EXIT_SUCCESS;
+}
+
+int media_sub_disable(void) {
+    int ret, index = subIndex;
+
+    if (index < 0) return EXIT_SUCCESS;
+
+    if ((ret = unbind_channel(index, 0)))
+        HAL_ERROR("media", "Unbinding channel %d failed with %#x!\n%s\n",
+            index, ret, errstr(ret));
+
+    if ((ret = media_video_disable(index, 0)))
+        HAL_ERROR("media", "Disabling encoder %d failed with %#x!\n%s\n",
+            index, ret, errstr(ret));
+
+    subIndex = -1;
+
+    return EXIT_SUCCESS;
+}
+
+/* Second H.26x encoder fed from the same capture pipeline, scaled down by
+ * its own VPSS channel and served only over RTSP (/sub or stream=1) */
+int media_sub_enable(void) {
+    int ret = EXIT_FAILURE;
+
+    if (subIndex >= 0) return EXIT_SUCCESS;
+
+    if (plat != HAL_PLATFORM_V4)
+        HAL_ERROR("media", "The sub stream is only supported on HiSilicon/Goke v4 for now!\n");
+
+    int index = take_next_free_channel(true);
+    if (index < 0)
+        HAL_ERROR("media", "No encoder channel left for the sub stream!\n");
+
+    /* Set before the encoder starts so its first frames are routed right */
+    subIndex = index;
+
+#if defined(__arm__) && !defined(__ARM_PCS_VFP)
+    ret = v4_channel_create_scaled(index, app_config.sub_width, app_config.sub_height,
+        app_config.mirror, app_config.flip, app_config.sub_fps);
+#endif
+    if (ret) {
+        chnState[index].enable = false;
+        subIndex = -1;
+        HAL_ERROR("media", "Creating channel %d failed with %#x!\n%s\n",
+            index, ret, errstr(ret));
+    }
+
+    {
+        hal_vidconfig config;
+        memset(&config, 0, sizeof(config));
+        config.width = app_config.sub_width;
+        config.height = app_config.sub_height;
+        config.codec = app_config.sub_codecH265 ?
+            HAL_VIDCODEC_H265 : HAL_VIDCODEC_H264;
+        config.mode = app_config.sub_mode;
+        config.profile = app_config.sub_profile;
+        config.gop = app_config.sub_gop;
+        config.framerate = app_config.sub_fps;
+        config.bitrate = app_config.sub_bitrate;
+        config.maxBitrate = app_config.sub_bitrate * 5 / 4;
+        config.intraRefresh = app_config.sub_intraRefresh;
+        config.intraRefreshMode = app_config.sub_intraRefreshMode;
+        config.intraRefreshNum = app_config.sub_intraRefreshNum;
+        config.intraRefreshQp = app_config.sub_intraRefreshQp;
+        config.ipQpDelta = app_config.sub_ipQpDelta;
+
+        ret = EXIT_FAILURE;
+#if defined(__arm__) && !defined(__ARM_PCS_VFP)
+        ret = v4_video_create(index, &config);
+#endif
+        if (ret) {
+            media_video_disable(index, 0);
+            chnState[index].enable = false;
+            subIndex = -1;
+            HAL_ERROR("media", "Creating encoder %d failed with %#x!\n%s\n",
+                index, ret, errstr(ret));
+        }
+    }
+
+    if ((ret = bind_channel(index, app_config.sub_fps, 0))) {
+        media_video_disable(index, 0);
+        chnState[index].enable = false;
+        subIndex = -1;
+        HAL_ERROR("media", "Binding channel %d failed with %#x!\n%s\n",
+            index, ret, errstr(ret));
+    }
+
+    /* A channel created after night mode kicked in has to follow it */
+    if (night_grayscale_on())
+        set_grayscale(true);
+
+    HAL_INFO("media", "Sub stream running on channel %d (%ux%u@%u)\n", index,
+        app_config.sub_width, app_config.sub_height, app_config.sub_fps);
 
     return EXIT_SUCCESS;
 }
@@ -915,6 +1030,11 @@ int sdk_start(void) {
             break;
 #endif
     }
+
+#if defined(__arm__) && !defined(__ARM_PCS_VFP)
+    if (plat == HAL_PLATFORM_V4 && app_config.sub_enable)
+        v4_system_reserve(app_config.sub_width, app_config.sub_height);
+#endif
 
     switch (plat) {
 #if defined(__ARM_PCS_VFP)
@@ -1018,6 +1138,11 @@ int sdk_start(void) {
     if (app_config.jpeg_enable && (ret = jpeg_init()))
         HAL_ERROR("media", "JPEG initialization failed with %#x!\n", ret);
 
+    /* Last, so the other channels keep the indexes they always had; a
+       failing sub stream is not worth losing the main one over */
+    if (app_config.sub_enable && media_sub_enable())
+        HAL_DANGER("media", "Sub stream initialization failed, continuing without it!\n");
+
 #if defined(__arm__) && !defined(__ARM_PCS_VFP)
     if (plat == HAL_PLATFORM_AK)
         ak_pipeline_streamon_sub();
@@ -1061,6 +1186,8 @@ int sdk_start(void) {
 
 int sdk_stop(void) {
     pthread_join(vidPid, NULL);
+
+    subIndex = -1;
 
     if (app_config.jpeg_enable)
         jpeg_deinit();

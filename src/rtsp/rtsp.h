@@ -101,6 +101,7 @@ struct connection_item_t {
     FILE *fp_tcp_write;
     int client_fd;
     int track_id;
+    int stream_id;
     int cseq;
 
     transport_t trans[2];
@@ -127,6 +128,15 @@ struct transfer_item_t {
     bufpool_handle pool;
 };
 
+/* Parameter sets of one video stream, collected from its NAL units */
+struct __rtsp_video_t {
+    char isH265;
+    mime_encoded_handle sprop_vps_b64;
+    mime_encoded_handle sprop_sps_b64;
+    mime_encoded_handle sprop_pps_b64;
+    mime_encoded_handle sprop_sps_b16;
+};
+
 struct __rtsp_obj_t {
     pthread_mutex_t mutex;
     struct list_head_t con_list;
@@ -135,12 +145,9 @@ struct __rtsp_obj_t {
     bufpool_handle transfer_pool;
     unsigned short port;
     struct __time_stat_t stat;
-    char isH265;
     unsigned char audioPt;
-    mime_encoded_handle sprop_vps_b64;
-    mime_encoded_handle sprop_sps_b64;
-    mime_encoded_handle sprop_pps_b64;
-    mime_encoded_handle sprop_sps_b16;
+    struct __rtsp_video_t video[RTSP_MAXIMUM_STREAMS];
+    int streams;
     unsigned ctx; /* for rand_r */
     int con_num;
     unsigned char max_con;

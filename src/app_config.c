@@ -177,6 +177,25 @@ int app_config_save(void) {
     else
         fprintf(file, "  ip_qp_delta: %d\n", app_config.mp4_ipQpDelta);
 
+    fprintf(file, "sub:\n");
+    fprintf(file, "  enable: %s\n", app_config.sub_enable ? "true" : "false");
+    fprintf(file, "  codec: %s\n", app_config.sub_codecH265 ? "H.265" : "H.264");
+    fprintf(file, "  mode: %d\n", app_config.sub_mode);
+    fprintf(file, "  width: %d\n", app_config.sub_width);
+    fprintf(file, "  height: %d\n", app_config.sub_height);
+    fprintf(file, "  fps: %d\n", app_config.sub_fps);
+    fprintf(file, "  gop: %d\n", app_config.sub_gop);
+    fprintf(file, "  profile: %d\n", app_config.sub_profile);
+    fprintf(file, "  bitrate: %d\n", app_config.sub_bitrate);
+    fprintf(file, "  intra_refresh: %s\n", app_config.sub_intraRefresh ? "true" : "false");
+    fprintf(file, "  intra_refresh_mode: %s\n", app_config.sub_intraRefreshMode ? "column" : "row");
+    fprintf(file, "  intra_refresh_num: %d\n", app_config.sub_intraRefreshNum);
+    fprintf(file, "  intra_refresh_qp: %d\n", app_config.sub_intraRefreshQp);
+    if (app_config.sub_ipQpDelta == HAL_IPQPDELTA_AUTO)
+        fprintf(file, "  ip_qp_delta: auto\n");
+    else
+        fprintf(file, "  ip_qp_delta: %d\n", app_config.sub_ipQpDelta);
+
     fprintf(file, "osd:\n");
     fprintf(file, "  enable: %s\n", app_config.osd_enable ? "true" : "false");
     for (char i = 0; i < MAX_OSD; i++) {
@@ -294,6 +313,21 @@ enum ConfigError app_config_parse(void) {
     app_config.mp4_intraRefreshQp = 0;
     app_config.mp4_ipQpDelta = HAL_IPQPDELTA_AUTO;
 
+    app_config.sub_enable = false;
+    app_config.sub_codecH265 = false;
+    app_config.sub_mode = HAL_VIDMODE_CBR;
+    app_config.sub_width = 640;
+    app_config.sub_height = 360;
+    app_config.sub_fps = 15;
+    app_config.sub_gop = 15;
+    app_config.sub_profile = HAL_VIDPROFILE_MAIN;
+    app_config.sub_bitrate = 512;
+    app_config.sub_intraRefresh = false;
+    app_config.sub_intraRefreshMode = HAL_IREFMODE_ROW;
+    app_config.sub_intraRefreshNum = 1;
+    app_config.sub_intraRefreshQp = 0;
+    app_config.sub_ipQpDelta = HAL_IPQPDELTA_AUTO;
+
     app_config.mjpeg_enable = false;
     app_config.mjpeg_fps = 15;
     app_config.mjpeg_width = 640;
@@ -396,10 +430,10 @@ enum ConfigError app_config_parse(void) {
             &app_config.check_interval_s);
         parse_int(
             &ini, "night_mode", "night_delay_s", 0, 3600,
-            &app_config.night_delay_s);
+            (int *)&app_config.night_delay_s);
         parse_int(
             &ini, "night_mode", "day_delay_s", 0, 3600,
-            &app_config.day_delay_s);
+            (int *)&app_config.day_delay_s);
         parse_int(
             &ini, "night_mode", "ir_cut_pin1", 0, PIN_MAX,
             &app_config.ir_cut_pin1);
@@ -611,6 +645,71 @@ enum ConfigError app_config_parse(void) {
         parse_int(&ini, "mp4", "intra_refresh_qp", 0, 51,
             &app_config.mp4_intraRefreshQp);
         parse_ipqpdelta(&ini, "mp4", &app_config.mp4_ipQpDelta);
+    }
+
+    parse_bool(&ini, "sub", "enable", &app_config.sub_enable);
+    if (app_config.sub_enable) {
+        {
+            const char *possible_values[] = {"H.264", "H.265", "H264", "H265", "AVC", "HEVC"};
+            const int count = sizeof(possible_values) / sizeof(const char *);
+            int val = 0;
+            parse_enum(&ini, "sub", "codec", (void *)&val,
+                possible_values, count, 0);
+            app_config.sub_codecH265 = val % 2;
+        }
+        {
+            const char *possible_values[] = {"CBR", "VBR", "QP", "ABR", "AVBR"};
+            const int count = sizeof(possible_values) / sizeof(const char *);
+            int val = 0;
+            parse_enum(&ini, "sub", "mode", (void *)&val,
+                possible_values, count, 0);
+            app_config.sub_mode = val;
+        }
+        err = parse_int(
+            &ini, "sub", "width", 160, INT_MAX, (int *)&app_config.sub_width);
+        if (err != CONFIG_OK)
+            goto RET_ERR;
+        err = parse_int(
+            &ini, "sub", "height", 120, INT_MAX, (int *)&app_config.sub_height);
+        if (err != CONFIG_OK)
+            goto RET_ERR;
+        err = parse_int(&ini, "sub", "fps", 1, INT_MAX, (int *)&app_config.sub_fps);
+        if (err != CONFIG_OK)
+            goto RET_ERR;
+        app_config.sub_gop = app_config.sub_fps;
+        parse_int(&ini, "sub", "gop", 1, USHRT_MAX, (int *)&app_config.sub_gop);
+        {
+            const char *possible_values[] = {"BP", "MP", "HP"};
+            const int count = sizeof(possible_values) / sizeof(const char *);
+            const char *possible_values2[] = {"BASELINE", "MAIN", "HIGH"};
+            const int count2 = sizeof(possible_values2) / sizeof(const char *);
+            int val = HAL_VIDPROFILE_MAIN;
+            if (parse_enum(&ini, "sub", "profile", (void *)&val,
+                    possible_values, count, 0) != CONFIG_OK)
+                parse_enum(&ini, "sub", "profile", (void *)&val,
+                    possible_values2, count2, 0);
+            app_config.sub_profile = val;
+        }
+        parse_int(&ini, "sub", "profile", 0, 2, (int *)&app_config.sub_profile);
+        err = parse_int(
+            &ini, "sub", "bitrate", 32, INT_MAX, (int *)&app_config.sub_bitrate);
+        if (err != CONFIG_OK)
+            goto RET_ERR;
+
+        parse_bool(&ini, "sub", "intra_refresh", &app_config.sub_intraRefresh);
+        {
+            const char *possible_values[] = {"ROW", "COLUMN"};
+            const int count = sizeof(possible_values) / sizeof(const char *);
+            int val = HAL_IREFMODE_ROW;
+            parse_enum(&ini, "sub", "intra_refresh_mode", (void *)&val,
+                possible_values, count, 0);
+            app_config.sub_intraRefreshMode = val;
+        }
+        parse_int(&ini, "sub", "intra_refresh_num", 1, INT_MAX,
+            (int *)&app_config.sub_intraRefreshNum);
+        parse_int(&ini, "sub", "intra_refresh_qp", 0, 51,
+            (int *)&app_config.sub_intraRefreshQp);
+        parse_ipqpdelta(&ini, "sub", &app_config.sub_ipQpDelta);
     }
 
     err = parse_bool(&ini, "jpeg", "enable", &app_config.jpeg_enable);

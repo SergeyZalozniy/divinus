@@ -19,7 +19,7 @@
 #include <netinet/in.h>
 #include <sys/ioctl.h>
 
-extern void request_idr();
+extern void request_idr_stream(int stream);
 
 /******************************************************************************
  *              PRIVATE DEFINITIONS
@@ -195,15 +195,17 @@ static void __method_describe(struct connection_item_t *p, rtsp_handle h)
             h->audioPt, h->audioPt, audioRtpfmt, (h->audioPt == 8 || h->audioPt == 0) ? 8000 : 90000);
     }
 
-    if (h->isH265 &&
-        h->sprop_vps_b64 && h->sprop_sps_b64 && h->sprop_pps_b64) {
-        DASSERT(h->sprop_vps_b64->result, return);
-        DASSERT(h->sprop_sps_b64->result, return);
-        DASSERT(h->sprop_pps_b64->result, return);
+    struct __rtsp_video_t *v = &h->video[p->stream_id];
 
-        DBG("VPS BASE64:%s\n", h->sprop_vps_b64->result);
-        DBG("SPS BASE64:%s\n", h->sprop_sps_b64->result);
-        DBG("PPS BASE64:%s\n", h->sprop_pps_b64->result);
+    if (v->isH265 &&
+        v->sprop_vps_b64 && v->sprop_sps_b64 && v->sprop_pps_b64) {
+        DASSERT(v->sprop_vps_b64->result, return);
+        DASSERT(v->sprop_sps_b64->result, return);
+        DASSERT(v->sprop_pps_b64->result, return);
+
+        DBG("VPS BASE64:%s\n", v->sprop_vps_b64->result);
+        DBG("SPS BASE64:%s\n", v->sprop_sps_b64->result);
+        DBG("PPS BASE64:%s\n", v->sprop_pps_b64->result);
 
         snprintf(sdp, __RTSP_TCP_BUF_SIZE- 1,
                 "%sm=video 0 RTP/AVP 96\r\n"
@@ -213,19 +215,19 @@ static void __method_describe(struct connection_item_t *p, rtsp_handle h)
                 " sprop-sps=%s;"
                 " sprop-pps=%s;%s",
                 baseRtp,
-                h->sprop_vps_b64->result,
-                h->sprop_sps_b64->result,
-                h->sprop_pps_b64->result,
+                v->sprop_vps_b64->result,
+                v->sprop_sps_b64->result,
+                v->sprop_pps_b64->result,
                 audioRtp);
-    } else if (!h->isH265 &&
-        h->sprop_sps_b64 && h->sprop_sps_b16 && h->sprop_pps_b64) {
-        DASSERT(h->sprop_sps_b64->result, return);
-        DASSERT(h->sprop_sps_b16->result, return);
-        DASSERT(h->sprop_pps_b64->result, return);
+    } else if (!v->isH265 &&
+        v->sprop_sps_b64 && v->sprop_sps_b16 && v->sprop_pps_b64) {
+        DASSERT(v->sprop_sps_b64->result, return);
+        DASSERT(v->sprop_sps_b16->result, return);
+        DASSERT(v->sprop_pps_b64->result, return);
 
-        DBG("SPS BASE64:%s\n", h->sprop_sps_b64->result);
-        DBG("SPS BASE16:%s\n", h->sprop_sps_b16->result);
-        DBG("PPS BASE64:%s\n", h->sprop_pps_b64->result);
+        DBG("SPS BASE64:%s\n", v->sprop_sps_b64->result);
+        DBG("SPS BASE16:%s\n", v->sprop_sps_b16->result);
+        DBG("PPS BASE64:%s\n", v->sprop_pps_b64->result);
 
         snprintf(sdp, __RTSP_TCP_BUF_SIZE - 1,
                 "%sm=video 0 RTP/AVP 96\r\n"
@@ -235,9 +237,9 @@ static void __method_describe(struct connection_item_t *p, rtsp_handle h)
                 " packetization-mode=1;"
                 " sprop-parameter-sets=%s,%s;%s",
                 baseRtp,
-                h->sprop_sps_b16->result,
-                h->sprop_sps_b64->result,
-                h->sprop_pps_b64->result,
+                v->sprop_sps_b16->result,
+                v->sprop_sps_b64->result,
+                v->sprop_pps_b64->result,
                 audioRtp);
     } else {
         snprintf(sdp, __RTSP_TCP_BUF_SIZE - 1,
@@ -246,7 +248,7 @@ static void __method_describe(struct connection_item_t *p, rtsp_handle h)
                 "a=rtpmap:96 %s/90000\r\n"
                 "a=fmtp:96 packetization-mode=1;%s",
                 baseRtp,
-                h->isH265 ? "H265" : "H264",
+                v->isH265 ? "H265" : "H264",
                 audioRtp);
     }
 
@@ -340,7 +342,7 @@ static void __method_play(struct connection_item_t *p, rtsp_handle h)
 
     p->con_state = __CON_S_PLAYING;
 
-    request_idr();
+    request_idr_stream(p->stream_id);
 }
 
 static int __method_teardown(struct connection_item_t *p, rtsp_handle h)
@@ -359,6 +361,38 @@ static int __method_teardown(struct connection_item_t *p, rtsp_handle h)
 /******************************************************************************
  *              METHOD IMPLEMENTATIONS
  ******************************************************************************/
+
+/* Picks the video stream from the URL of a request line: "/sub" as the
+   first path segment or "stream=1" anywhere in the path select the sub
+   stream, anything else ("/", "/main", "stream=0", ...) the main one.
+   With a single stream configured the path is ignored as it always was. */
+static int __stream_from_request(rtsp_handle h, const char *line)
+{
+    char url[256], *path, *end;
+    const char *start;
+
+    if (h->streams < 2) return 0;
+
+    if (!(start = strchr(line, ' '))) return 0;
+    while (*start == ' ') start++;
+    strncpy(url, start, sizeof(url) - 1);
+    url[sizeof(url) - 1] = '\0';
+    if ((end = strpbrk(url, " \r\n"))) *end = '\0';
+
+    path = url;
+    if ((end = strstr(url, "://"))) {
+        if (!(path = strchr(end + 3, '/'))) return 0;
+    }
+
+    if (!strncmp(path, "/sub", 4) &&
+        (path[4] == '\0' || path[4] == '/' || path[4] == '?'))
+        return 1;
+
+    for (end = path; (end = strstr(end, "stream=1")); end += 8)
+        if (end[8] < '0' || end[8] > '9') return 1;
+
+    return 0;
+}
 
 static int __message_proc_sock(struct list_t *e, void *p)
 {
@@ -410,7 +444,9 @@ static int __message_proc_sock(struct list_t *e, void *p)
                 con->track_id = 0;
                 if (SCMP(__STR_OPTIONS, buf))            { con->method = __METHOD_OPTIONS;
                 } else if (SCMP(__STR_DESCRIBE, buf))    { con->method = __METHOD_DESCRIBE;
+                    con->stream_id = __stream_from_request(h, buf);
                 } else if (SCMP(__STR_SETUP, buf))       { con->method = __METHOD_SETUP;
+                    con->stream_id = __stream_from_request(h, buf);
                     STR_KEY_NUM(buf, "track=", con->track_id);
                 } else if (SCMP(__STR_PLAY, buf))        { con->method = __METHOD_PLAY;
                 } else if (SCMP(__STR_RECORDING, buf))   { con->method = __METHOD_RECORDING;
@@ -534,6 +570,7 @@ static int __connection_reset(void *v)
 
     p->given_session_id = 0;
     p->cseq = 0;
+    p->stream_id = 0;
 
     /* randomize session id to avoid conflict */
     p->session_id = __get_random_llu(&ctx);
@@ -864,10 +901,12 @@ void rtsp_finish(rtsp_handle h)
             bufpool_delete(h->con_pool);
             bufpool_delete(h->transfer_pool);
 
-            mime_encoded_delete(h->sprop_vps_b64);
-            mime_encoded_delete(h->sprop_sps_b64);
-            mime_encoded_delete(h->sprop_sps_b16);
-            mime_encoded_delete(h->sprop_pps_b64);
+            for (int i = 0; i < RTSP_MAXIMUM_STREAMS; i++) {
+                mime_encoded_delete(h->video[i].sprop_vps_b64);
+                mime_encoded_delete(h->video[i].sprop_sps_b64);
+                mime_encoded_delete(h->video[i].sprop_sps_b16);
+                mime_encoded_delete(h->video[i].sprop_pps_b64);
+            }
 
             threadpool_delete(h->pool);
         }
@@ -891,6 +930,7 @@ rtsp_handle rtsp_create(unsigned char max_con, unsigned int port, int priority)
     TALLOC(nh, return NULL);
 
     nh->audioPt = 255;
+    nh->streams = 1;
     nh->max_con = max_con;
     nh->port = port;
     nh->priority = priority;
@@ -926,6 +966,13 @@ void rtsp_configure_auth(rtsp_handle h, const char *user, const char *pass)
     } else {
         h->isAuthOn = 0;
     }
+}
+
+void rtsp_configure_streams(rtsp_handle h, int count)
+{
+    if (!h) return;
+    h->streams = count < 1 ? 1 :
+        count > RTSP_MAXIMUM_STREAMS ? RTSP_MAXIMUM_STREAMS : count;
 }
 
 int rtsp_tick(rtsp_handle h)

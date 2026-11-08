@@ -33,6 +33,7 @@ int media_start(void);
 void media_stop(void);
 
 void request_idr(void);
+void request_idr_stream(int stream);
 void set_grayscale(bool active);
 int take_next_free_channel(bool mainLoop);
 
@@ -47,5 +48,7 @@ int media_mjpeg_disable(void);
 int media_mjpeg_enable(void);
 int media_mp4_disable(void);
 int media_mp4_enable(void);
+int media_sub_disable(void);
+int media_sub_enable(void);
 
 void rtsp_latch_audio_codec(void);

@@ -59,6 +59,8 @@ This document describes the fields that can be found within a configuration file
 - **auth_pass**: Password for RTSP authentication (default: `12345`).
 - **port**: Port number for RTSP server (default: `554`).
 
+With the sub stream enabled, the URL path picks the video stream: `/sub` or a path containing `stream=1` serves the sub stream, anything else (`/`, `/main`, `stream=0`, ...) the main one. Without it the path is ignored.
+
 ## Record section
 
 - **enable**: Boolean to allow or block recording operations (default: `false`).
@@ -97,6 +99,14 @@ This document describes the fields that can be found within a configuration file
 - **intra_refresh_num**: Number of rows or columns intra coded per frame (default: `1`).
 - **intra_refresh_qp**: QP for the requested I-frames, 0-51 (default: `0`).
 - **ip_qp_delta**: QP difference between I and P frames, -10 to 30, or `auto`: GOP length divided by the framerate, or `0` with `intra_refresh`, where the GOP start is not a keyframe and a lower QP would only inflate it; only on HiSilicon/Goke v4 at the moment (default: `auto`).
+
+## Sub section
+
+Optional second H.264/H.265 stream from the same sensor, scaled down by its own VPSS channel and served over RTSP only (see the RTSP section for the URLs). Only on HiSilicon/Goke v4 (Hi3516EV200/300, GK7205V200/300) at the moment; with `enable: false` nothing changes.
+
+- **enable**: Boolean to activate the sub stream (default: `false`).
+- **codec**, **mode**, **width**, **height**, **fps**, **gop**, **profile**, **bitrate**: Same meaning as in the MP4 section (defaults: H.264, CBR, 640x360, 15 fps, GOP = fps, MP, 512 kbps).
+- **intra_refresh**, **intra_refresh_mode**, **intra_refresh_num**, **intra_refresh_qp**, **ip_qp_delta**: Same meaning and defaults as in the MP4 section.
 
 ## OSD section
 

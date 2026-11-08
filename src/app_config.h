@@ -101,6 +101,22 @@ struct AppConfig {
     unsigned int mp4_intraRefreshQp;
     int mp4_ipQpDelta;
 
+    // [sub]
+    bool sub_enable;
+    bool sub_codecH265;
+    unsigned int sub_mode;
+    unsigned int sub_fps;
+    unsigned int sub_gop;
+    unsigned int sub_width;
+    unsigned int sub_height;
+    unsigned int sub_profile;
+    unsigned int sub_bitrate;
+    bool sub_intraRefresh;
+    unsigned int sub_intraRefreshMode;
+    unsigned int sub_intraRefreshNum;
+    unsigned int sub_intraRefreshQp;
+    int sub_ipQpDelta;
+
     // [jpeg]
     bool jpeg_enable;
     unsigned int jpeg_width;

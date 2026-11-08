@@ -1222,6 +1222,133 @@ void respond_request(http_request_t *req) {
         return;
     }
 
+    if (EQUALS(req->uri, "/api/sub")) {
+        if (req->query) {
+            while (req->query) {
+                char *value = split(&req->query, "&");
+                if (!value || !*value) continue;
+                unescape_uri(value);
+                char *key = split(&value, "=");
+                if (!key || !*key || !value || !*value) continue;
+                if (EQUALS(key, "enable")) {
+                    if (EQUALS_CASE(value, "true") || EQUALS(value, "1"))
+                        app_config.sub_enable = 1;
+                    else if (EQUALS_CASE(value, "false") || EQUALS(value, "0"))
+                        app_config.sub_enable = 0;
+                } else if (EQUALS(key, "width")) {
+                    long result;
+                    if (parse_ranged(value, 160, 4096, &result))
+                        app_config.sub_width = result;
+                } else if (EQUALS(key, "height")) {
+                    long result;
+                    if (parse_ranged(value, 120, 4096, &result))
+                        app_config.sub_height = result;
+                } else if (EQUALS(key, "fps")) {
+                    long result;
+                    if (parse_ranged(value, 1, 120, &result))
+                        app_config.sub_fps = result;
+                } else if (EQUALS(key, "gop")) {
+                    long result;
+                    if (parse_ranged(value, 1, 65535, &result))
+                        app_config.sub_gop = result;
+                } else if (EQUALS(key, "bitrate")) {
+                    long result;
+                    if (parse_ranged(value, 32, 65535, &result))
+                        app_config.sub_bitrate = result;
+                } else if (EQUALS(key, "h265")) {
+                    if (EQUALS_CASE(value, "true") || EQUALS(value, "1"))
+                        app_config.sub_codecH265 = 1;
+                    else if (EQUALS_CASE(value, "false") || EQUALS(value, "0"))
+                        app_config.sub_codecH265 = 0;
+                } else if (EQUALS(key, "mode")) {
+                    if (EQUALS_CASE(value, "CBR"))
+                        app_config.sub_mode = HAL_VIDMODE_CBR;
+                    else if (EQUALS_CASE(value, "VBR"))
+                        app_config.sub_mode = HAL_VIDMODE_VBR;
+                    else if (EQUALS_CASE(value, "QP"))
+                        app_config.sub_mode = HAL_VIDMODE_QP;
+                    else if (EQUALS_CASE(value, "ABR"))
+                        app_config.sub_mode = HAL_VIDMODE_ABR;
+                    else if (EQUALS_CASE(value, "AVBR"))
+                        app_config.sub_mode = HAL_VIDMODE_AVBR;
+                } else if (EQUALS(key, "profile")) {
+                    if (EQUALS_CASE(value, "BP") || EQUALS_CASE(value, "BASELINE"))
+                        app_config.sub_profile = HAL_VIDPROFILE_BASELINE;
+                    else if (EQUALS_CASE(value, "MP") || EQUALS_CASE(value, "MAIN"))
+                        app_config.sub_profile = HAL_VIDPROFILE_MAIN;
+                    else if (EQUALS_CASE(value, "HP") || EQUALS_CASE(value, "HIGH"))
+                        app_config.sub_profile = HAL_VIDPROFILE_HIGH;
+                } else if (EQUALS(key, "intra_refresh")) {
+                    if (EQUALS_CASE(value, "true") || EQUALS(value, "1"))
+                        app_config.sub_intraRefresh = 1;
+                    else if (EQUALS_CASE(value, "false") || EQUALS(value, "0"))
+                        app_config.sub_intraRefresh = 0;
+                } else if (EQUALS(key, "intra_refresh_mode")) {
+                    if (EQUALS_CASE(value, "ROW"))
+                        app_config.sub_intraRefreshMode = HAL_IREFMODE_ROW;
+                    else if (EQUALS_CASE(value, "COLUMN"))
+                        app_config.sub_intraRefreshMode = HAL_IREFMODE_COLUMN;
+                } else if (EQUALS(key, "intra_refresh_num")) {
+                    long result;
+                    if (parse_ranged(value, 1, 255, &result))
+                        app_config.sub_intraRefreshNum = result;
+                } else if (EQUALS(key, "intra_refresh_qp")) {
+                    long result;
+                    if (parse_ranged(value, 0, 51, &result))
+                        app_config.sub_intraRefreshQp = result;
+                } else if (EQUALS(key, "ip_qp_delta")) {
+                    long result;
+                    if (EQUALS_CASE(value, "auto"))
+                        app_config.sub_ipQpDelta = HAL_IPQPDELTA_AUTO;
+                    else if (parse_ranged(value, -10, 30, &result))
+                        app_config.sub_ipQpDelta = result;
+                }
+            }
+
+            /* Applied at once; its video buffer pool keeps the size the
+               SDK started with until the next restart */
+            media_sub_disable();
+            if (app_config.sub_enable) media_sub_enable();
+            if (app_config.rtsp_enable)
+                rtsp_configure_streams(rtspHandle, app_config.sub_enable ? 2 : 1);
+        }
+
+        char mode[5] = "\0";
+        char profile[3] = "\0";
+        switch (app_config.sub_mode) {
+            case HAL_VIDMODE_CBR: strcpy(mode, "CBR"); break;
+            case HAL_VIDMODE_VBR: strcpy(mode, "VBR"); break;
+            case HAL_VIDMODE_QP: strcpy(mode, "QP"); break;
+            case HAL_VIDMODE_ABR: strcpy(mode, "ABR"); break;
+            case HAL_VIDMODE_AVBR: strcpy(mode, "AVBR"); break;
+        }
+        switch (app_config.sub_profile) {
+            case HAL_VIDPROFILE_BASELINE: strcpy(profile, "BP"); break;
+            case HAL_VIDPROFILE_MAIN: strcpy(profile, "MP"); break;
+            case HAL_VIDPROFILE_HIGH: strcpy(profile, "HP"); break;
+        }
+        char ipqpdelta[8] = "\"auto\"";
+        if (app_config.sub_ipQpDelta != HAL_IPQPDELTA_AUTO)
+            sprintf(ipqpdelta, "%d", app_config.sub_ipQpDelta);
+        respLen = sprintf(response,
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: application/json;charset=UTF-8\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+            "{\"enable\":%s,\"width\":%d,\"height\":%d,\"fps\":%d,\"gop\":%d,"
+            "\"h265\":%s,\"mode\":\"%s\",\"profile\":\"%s\",\"bitrate\":%d,"
+            "\"intra_refresh\":%s,\"intra_refresh_mode\":\"%s\",\"intra_refresh_num\":%d,"
+            "\"intra_refresh_qp\":%d,\"ip_qp_delta\":%s}",
+            app_config.sub_enable ? "true" : "false", app_config.sub_width, app_config.sub_height,
+            app_config.sub_fps, app_config.sub_gop, app_config.sub_codecH265 ? "true" : "false",
+            mode, profile, app_config.sub_bitrate,
+            app_config.sub_intraRefresh ? "true" : "false",
+            app_config.sub_intraRefreshMode == HAL_IREFMODE_COLUMN ? "column" : "row",
+            app_config.sub_intraRefreshNum, app_config.sub_intraRefreshQp, ipqpdelta);
+        send_and_close(req->clntFd, response, respLen);
+        return;
+    }
+
     if (EQUALS(req->uri, "/api/rtsp")) {
         if (req->query) {
             char *remain;
