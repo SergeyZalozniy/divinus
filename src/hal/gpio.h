@@ -7,13 +7,12 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0)
 #include <linux/gpio.h>
 #include <sys/ioctl.h>
-#else
-#include <string.h>
 #endif
 
 #include "macros.h"
