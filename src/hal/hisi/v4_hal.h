@@ -17,6 +17,7 @@
 #include "common.h"
 
 #include <fcntl.h>
+#include <pthread.h>
 #include <sys/ioctl.h>
 #include <sys/select.h>
 #include <unistd.h>
@@ -38,6 +39,8 @@ int v4_channel_create_scaled(char index, short width, short height,
     char mirror, char flip, char framerate);
 int v4_channel_grayscale(char enable);
 int v4_channel_unbind(char index);
+
+int v4_isp_exposure(unsigned int *again, unsigned int *aveLum);
 
 void *v4_image_thread(void);
 

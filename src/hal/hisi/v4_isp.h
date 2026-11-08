@@ -31,6 +31,52 @@ typedef struct {
     unsigned char mode;
 } v4_isp_dev;
 
+/* ISP_AE_ROUTE_S, ISP_AE_ROUTE_EX_S and ISP_EXP_INFO_S of the
+   Hi3516EV200/EV300 and GK7205V200/V300 SDKs (mpi_ae.h) */
+typedef struct {
+    unsigned int intTime;
+    unsigned int sysGain;
+    int irisFNo;
+    unsigned int irisFNoLin;
+} v4_isp_aenode;
+
+typedef struct {
+    unsigned int total;
+    v4_isp_aenode node[16];
+} v4_isp_aeroute;
+
+typedef struct {
+    unsigned int intTime;
+    unsigned int again;
+    unsigned int dgain;
+    unsigned int ispDgain;
+    int irisFNo;
+    unsigned int irisFNoLin;
+} v4_isp_aenodeex;
+
+typedef struct {
+    unsigned int total;
+    v4_isp_aenodeex node[16];
+} v4_isp_aerouteex;
+
+typedef struct {
+    unsigned int expTime, shortExpTime, medianExpTime, longExpTime;
+    // Gains in 22.10 fixed point (1024 = 1x)
+    unsigned int again, dgain, againSf, dgainSf, ispDgain;
+    unsigned int exposure;
+    int exposureIsMax;
+    short histError;
+    unsigned int hist1024[1024];
+    // Average luma of the picture, 0-255
+    unsigned char aveLum;
+    unsigned int linesPer500ms, pirisFNo, fps, iso, isoSf, isoCalibrate;
+    unsigned int refExpRatio, firstStableTime;
+    v4_isp_aeroute route;
+    v4_isp_aerouteex routeEx;
+    v4_isp_aeroute routeSf;
+    v4_isp_aerouteex routeSfEx;
+} v4_isp_exp;
+
 typedef struct {
     void *handleCalcFlick, *handle, *handleAcs, *handleDehaze, *handleDrc, *handleLdci, *handleIrAuto, *handleAwb, 
         *handleGokeAwb, *handleAe, *handleGokeAe,  *handleGoke;
@@ -46,6 +92,9 @@ typedef struct {
     int (*fnRegisterAWB)(int pipe, v4_isp_alg *library);
     int (*fnUnregisterAE)(int pipe, v4_isp_alg *library);
     int (*fnUnregisterAWB)(int pipe, v4_isp_alg *library);
+
+    // Optional, NULL when the library lacks it
+    int (*fnQueryExposureInfo)(int pipe, v4_isp_exp *info);
 } v4_isp_impl;
 
 static int v4_isp_load(v4_isp_impl *isp_lib) {
@@ -148,6 +197,12 @@ loaded:
     if (!(isp_lib->fnUnregisterAWB = (int(*)(int pipe, v4_isp_alg *library))
         hal_symbol_load("v4_isp", isp_lib->handleAwb, "HI_MPI_AWB_UnRegister")))
         return EXIT_FAILURE;
+
+    if (!(isp_lib->fnQueryExposureInfo = (int(*)(int pipe, v4_isp_exp *info))
+        dlsym(isp_lib->handle, "HI_MPI_ISP_QueryExposureInfo")) &&
+        !(isp_lib->fnQueryExposureInfo = (int(*)(int pipe, v4_isp_exp *info))
+        dlsym(isp_lib->handleAe, "HI_MPI_ISP_QueryExposureInfo")))
+        HAL_INFO("v4_isp", "Exposure info is not supported by this library!\n");
 
     return EXIT_SUCCESS;
 }

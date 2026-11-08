@@ -1490,6 +1490,14 @@ void respond_request(http_request_t *req) {
                     long result;
                     if (parse_ranged(value, 0, 3600, &result))
                         app_config.day_delay_s = result;
+                } else if (EQUALS(key, "day_min_lum")) {
+                    long result;
+                    if (parse_ranged(value, 0, 255, &result))
+                        app_config.day_min_lum = result;
+                } else if (EQUALS(key, "day_max_gain")) {
+                    long result;
+                    if (parse_ranged(value, 0, INT_MAX, &result))
+                        app_config.day_max_gain = result;
                 } else if (EQUALS(key, "manual")) {
                     if (EQUALS_CASE(value, "true") || EQUALS(value, "1"))
                         night_manual(1);
@@ -1501,6 +1509,13 @@ void respond_request(http_request_t *req) {
             night_disable();
             if (app_config.night_mode_enable) night_enable();
         }
+        /* Live auto-exposure values, to tune day_min_lum / day_max_gain */
+        char exposure[48] = "\"isp_lum\":null,\"isp_again\":null";
+        {
+            unsigned int again, lum;
+            if (!get_exposure(&again, &lum))
+                sprintf(exposure, "\"isp_lum\":%u,\"isp_again\":%u", lum, again);
+        }
         respLen = sprintf(response,
             "HTTP/1.1 200 OK\r\n"
             "Content-Type: application/json;charset=UTF-8\r\n"
@@ -1508,13 +1523,15 @@ void respond_request(http_request_t *req) {
             "\r\n"
             "{\"active\":%s,\"manual\":%s,\"grayscale\":%s,\"ircut\":%s,\"ircut_pin1\":%d,\"ircut_pin2\":%d,"
             "\"irled\":%s,\"irled_pin\":%d,\"irsense_pin\":%d,\"irsense_invert\":%s,"
-            "\"night_delay_s\":%d,\"day_delay_s\":%d,\"adc_device\":\"%s\",\"adc_threshold\":%d}",
+            "\"night_delay_s\":%d,\"day_delay_s\":%d,\"day_min_lum\":%u,\"day_max_gain\":%u,%s,"
+            "\"adc_device\":\"%s\",\"adc_threshold\":%d}",
             app_config.night_mode_enable ? "true" : "false", night_manual_on() ? "true" : "false",
             night_grayscale_on() ? "true" : "false",
             night_ircut_on() ? "true" : "false", app_config.ir_cut_pin1, app_config.ir_cut_pin2,
             night_irled_on() ? "true" : "false", app_config.ir_led_pin, app_config.ir_sensor_pin,
             app_config.ir_sensor_invert ? "true" : "false",
             app_config.night_delay_s, app_config.day_delay_s,
+            app_config.day_min_lum, app_config.day_max_gain, exposure,
             app_config.adc_device, app_config.adc_threshold);
         send_and_close(req->clntFd, response, respLen);
         return;

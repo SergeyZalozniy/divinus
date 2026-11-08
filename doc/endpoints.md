@@ -224,6 +224,8 @@ Configures the night mode parameters.
 | GET    | `irsense_invert` | Low sensor level = night |
 | GET    | `night_delay_s`| Darkness hold before night|
 | GET    | `day_delay_s`  | Daylight hold before day  |
+| GET    | `day_min_lum`  | Min. picture luma for day |
+| GET    | `day_max_gain` | Max. analog gain for day  |
 | GET    | `adc_device`   | ADC device                |
 | GET    | `adc_threshold`| Activation threshold      |
 
@@ -242,6 +244,10 @@ Configures the night mode parameters.
   "irsense_invert": false,
   "night_delay_s": 20,
   "day_delay_s": 60,
+  "day_min_lum": 20,
+  "day_max_gain": 0,
+  "isp_lum": 54,
+  "isp_again": 3313,
   "adc_device": "/dev/adc",
   "adc_threshold": 800
 }

@@ -29,6 +29,8 @@ This document describes the fields that can be found within a configuration file
 - **check_interval_s**: Interval in seconds to check night mode conditions.
 - **night_delay_s**: Seconds the sensor must keep reporting darkness before switching to night mode, counted in steps of `check_interval_s`; `0` switches on the first differing reading (default: `0`).
 - **day_delay_s**: Seconds the sensor must keep reporting daylight before switching back to day mode, same rules as `night_delay_s` (default: `0`).
+- **day_min_lum**: In night mode, a daylight reading from the sensor only counts if the average picture luma reported by the ISP auto exposure (0-255) is at least this value; `0` disables the check (default: `0`). Meant for illuminators that switch their IR LEDs off on their own for a while: the sensor then reads daylight, but the picture is nearly black at maximum gain. Only on HiSilicon/Goke v4 for now; elsewhere, or when the ISP cannot report it, the sensor alone decides.
+- **day_max_gain**: Same idea with the sensor analog gain: a daylight reading only counts while the gain is at most this value, in 1/1024 steps (`1024` = 1x); `0` disables the check (default: `0`). `/api/night` shows the current `isp_lum` and `isp_again` for tuning both values.
 - **pin_switch_delay_us**: Delay in microseconds before switching GPIO pins, must be used to protect cut filter coils from burning.
 - **adc_device**: Path to the ADC device used for night mode.
 - **lamp**: Illuminator mode on Fullhan V100, combinable: `ir` (default), `white` (colour night vision, IR-cut filter in) or `none`. Combine with commas, e.g. `ir,white`.

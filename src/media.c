@@ -397,6 +397,17 @@ void set_grayscale(bool active) {
     pthread_mutex_unlock(&chnMtx);
 }
 
+/* Analog gain (1024 = 1x) and average picture luma (0-255) from the
+ * ISP auto exposure, where the HAL provides them */
+int get_exposure(unsigned int *again, unsigned int *aveLum) {
+    switch (plat) {
+#if defined(__arm__) && !defined(__ARM_PCS_VFP)
+        case HAL_PLATFORM_V4:  return v4_isp_exposure(again, aveLum);
+#endif
+    }
+    return EXIT_FAILURE;
+}
+
 int take_next_free_channel(bool mainLoop) {
     pthread_mutex_lock(&chnMtx);
     for (int i = 0; i < chnCount; i++) {

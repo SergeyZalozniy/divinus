@@ -229,6 +229,28 @@ int v4_channel_unbind(char index)
     return EXIT_SUCCESS;
 }
 
+/* Current analog gain (22.10, 1024 = 1x) and average luma (0-255) from
+ * the auto exposure; fails when the library or the ISP cannot tell */
+int v4_isp_exposure(unsigned int *again, unsigned int *aveLum)
+{
+    /* About 5.5 KB, kept off the callers' small thread stacks */
+    static v4_isp_exp info;
+    static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+    int ret;
+
+    if (!v4_isp.fnQueryExposureInfo)
+        return EXIT_FAILURE;
+
+    pthread_mutex_lock(&mutex);
+    if (!(ret = v4_isp.fnQueryExposureInfo(_v4_vi_pipe, &info))) {
+        *again = info.again;
+        *aveLum = info.aveLum;
+    }
+    pthread_mutex_unlock(&mutex);
+
+    return ret;
+}
+
 void *v4_image_thread(void)
 {
     int ret;

@@ -95,6 +95,8 @@ int app_config_save(void) {
     fprintf(file, "  check_interval_s: %d\n", app_config.check_interval_s);
     fprintf(file, "  night_delay_s: %d\n", app_config.night_delay_s);
     fprintf(file, "  day_delay_s: %d\n", app_config.day_delay_s);
+    fprintf(file, "  day_min_lum: %d\n", app_config.day_min_lum);
+    fprintf(file, "  day_max_gain: %d\n", app_config.day_max_gain);
     fprintf(file, "  ir_cut_pin1: %d\n", app_config.ir_cut_pin1);
     fprintf(file, "  ir_cut_pin2: %d\n", app_config.ir_cut_pin2);
     fprintf(file, "  ir_led_pin: %d\n", app_config.ir_led_pin);
@@ -349,6 +351,8 @@ enum ConfigError app_config_parse(void) {
     app_config.ir_sensor_invert = false;
     app_config.night_delay_s = 0;
     app_config.day_delay_s = 0;
+    app_config.day_min_lum = 0;
+    app_config.day_max_gain = 0;
     app_config.adc_device[0] = 0;
     app_config.night_lamp = HAL_LIGHT_IR;
     app_config.adc_threshold = 128;
@@ -434,6 +438,12 @@ enum ConfigError app_config_parse(void) {
         parse_int(
             &ini, "night_mode", "day_delay_s", 0, 3600,
             (int *)&app_config.day_delay_s);
+        parse_int(
+            &ini, "night_mode", "day_min_lum", 0, 255,
+            (int *)&app_config.day_min_lum);
+        parse_int(
+            &ini, "night_mode", "day_max_gain", 0, INT_MAX,
+            (int *)&app_config.day_max_gain);
         parse_int(
             &ini, "night_mode", "ir_cut_pin1", 0, PIN_MAX,
             &app_config.ir_cut_pin1);

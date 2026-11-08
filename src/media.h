@@ -35,6 +35,7 @@ void media_stop(void);
 void request_idr(void);
 void request_idr_stream(int stream);
 void set_grayscale(bool active);
+int get_exposure(unsigned int *again, unsigned int *aveLum);
 int take_next_free_channel(bool mainLoop);
 
 int create_channel(char index, short width, short height, char framerate, char jpeg);

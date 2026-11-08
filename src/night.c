@@ -48,8 +48,41 @@ static void night_lamp(bool enable) {
 
 void night_manual(bool enable) { manual = enable; }
 
-static bool sensed = false;
+static bool sensed = false, vetoed = false, noExposure = false;
 static unsigned int pending = 0;
+
+/* Some illuminators switch their IR LEDs off on their own for a while,
+ * which a light sensor next to them reads as daylight. In real daylight
+ * the picture stays bright with a moderate gain, while in such an
+ * off-cycle the auto exposure ends at maximum gain with a nearly black
+ * picture. So in night mode a bright reading only counts as daylight
+ * if the image agrees: average luma at least day_min_lum and analog
+ * gain at most day_max_gain (each check off when 0). Without exposure
+ * data from the ISP the sensor alone decides. */
+static bool night_daylight_confirmed(void) {
+    unsigned int again, lum;
+
+    if (!app_config.day_min_lum && !app_config.day_max_gain)
+        return true;
+
+    if (get_exposure(&again, &lum)) {
+        if (!noExposure)
+            HAL_WARNING("night", "No exposure data from the ISP, "
+                "day_min_lum and day_max_gain are ignored\n");
+        noExposure = true;
+        return true;
+    }
+    noExposure = false;
+
+    bool ok = (!app_config.day_min_lum || lum >= app_config.day_min_lum) &&
+        (!app_config.day_max_gain || again <= app_config.day_max_gain);
+    if (!ok && !vetoed)
+        HAL_INFO("night", "Sensor reads bright but the image is dark "
+            "(luma %u, gain %u), staying in night mode\n", lum, again);
+    vetoed = !ok;
+
+    return ok;
+}
 
 /* Feeds one sensor reading (true = dark) taken step_s seconds after the
  * previous one. The first reading after the thread starts applies at once;
@@ -58,6 +91,10 @@ static unsigned int pending = 0;
  * seconds in a row. With both delays at 0 it flips on the first differing
  * reading, and an unchanged reading no longer re-pulses the IR-cut coil. */
 static void night_sense(bool dark, unsigned int step_s) {
+    if (!dark && !manual && night_mode_on() && !night_daylight_confirmed())
+        dark = true;
+    else if (dark) vetoed = false;
+
     if (manual || dark == night_mode_on()) {
         sensed = true;
         pending = 0;
@@ -116,6 +153,7 @@ void *night_thread(void) {
     usleep(10000);
 
     sensed = false;
+    vetoed = noExposure = false;
     pending = 0;
 
     if (!manual) night_mode(night_mode_on());
