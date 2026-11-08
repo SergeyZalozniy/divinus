@@ -733,7 +733,16 @@ int v4_video_create(char index, hal_vidconfig *config)
     } else HAL_ERROR("v4_venc", "This codec is not supported by the hardware!");
     channel.attrib.maxPic.width = config->width;
     channel.attrib.maxPic.height = config->height;
-    channel.attrib.bufSize = ALIGN_UP(config->height * config->width * 3 / 4, 64);
+    /* Stream buffer as in the vendor sample (sample_comm_venc.c, MPP V4):
+       JPEG/MJPEG take ALIGN_UP(w, 16) * ALIGN_UP(h, 16), H.26x take
+       ALIGN_UP(w * h * 3 / 4, 64). The samples run with the module defaults
+       (MiniBufMode 0), where the JPEG encoder rejects w * h * 3 / 4 with
+       ILLEGAL_PARAM; with JpegeMiniBufMode 1 (v4_venc_modparams) it takes
+       either. */
+    if (channel.attrib.codec == V4_VENC_CODEC_MJPG)
+        channel.attrib.bufSize = ALIGN_UP(config->width, 16) * ALIGN_UP(config->height, 16);
+    else
+        channel.attrib.bufSize = ALIGN_UP(config->height * config->width * 3 / 4, 64);
     if (channel.attrib.codec == V4_VENC_CODEC_H264)
         channel.attrib.profile = MAX(config->profile, 2);
     channel.attrib.byFrame = 1;
@@ -795,8 +804,9 @@ int v4_video_destroy(char index)
             .device = _v4_vpss_grp, .channel = index };
         v4_sys_bind dest = { .module = V4_SYS_MOD_VENC,
             .device = _v4_venc_dev, .channel = index };
-        if (ret = v4_sys.fnUnbind(&source, &dest))
-            return ret;
+        /* Not fatal: the snapshot channel is only bound during a request,
+           and a channel whose start failed may never have been bound */
+        v4_sys.fnUnbind(&source, &dest);
     }
 
     if (ret = v4_venc.fnDestroyChannel(index))
@@ -1087,6 +1097,52 @@ void v4_system_deinit(void)
     v4_sensor_deinit();
 }
 
+/* Encoder module parameters, as majestic sets them: mini stream buffers for
+ * H.264/H.265/JPEG and a cached stream buffer. They live in the kernel
+ * modules until the next boot and can only be changed while no encoder
+ * channel exists, so this runs once before the first channel. */
+static void v4_venc_modparams(void)
+{
+    static const char *name[] = { "", "VencBufferCache", "H264E MiniBufMode",
+        "H265E MiniBufMode", "JpegeMiniBufMode" };
+    char line[160] = "";
+    int ret, pos = 0;
+
+    if (!v4_venc.fnGetModParam || !v4_venc.fnSetModParam) return;
+
+    for (int type = V4_VENC_MODTYPE_VENC; type <= V4_VENC_MODTYPE_JPEGE; type++) {
+        v4_venc_mod param;
+        unsigned int *value, old;
+        memset(&param, 0, sizeof(param));
+        param.type = type;
+        if ((ret = v4_venc.fnGetModParam(&param))) {
+            HAL_WARNING("v4_venc", "Reading the %s module parameter failed "
+                "with %#x!\n", name[type], ret);
+            continue;
+        }
+        switch (type) {
+            case V4_VENC_MODTYPE_VENC:  value = &param.venc.bufferCache; break;
+            case V4_VENC_MODTYPE_H264E: value = &param.h264e.miniBufMode; break;
+            case V4_VENC_MODTYPE_H265E: value = &param.h265e.miniBufMode; break;
+            default:                    value = &param.jpege.miniBufMode; break;
+        }
+        old = *value;
+        if (old != 1) {
+            *value = 1;
+            if ((ret = v4_venc.fnSetModParam(&param))) {
+                HAL_WARNING("v4_venc", "Setting %s to 1 failed with %#x!\n",
+                    name[type], ret);
+                continue;
+            }
+        }
+        if (pos < (int)sizeof(line))
+            pos += snprintf(line + pos, sizeof(line) - pos, "%s%s %u->1",
+                pos ? ", " : "", name[type], old);
+    }
+
+    if (pos) HAL_INFO("v4_venc", "Module parameters: %s\n", line);
+}
+
 int v4_system_init(char *snrConfig)
 {
     int ret;
@@ -1153,6 +1209,8 @@ int v4_system_init(char *snrConfig)
 
     if (ret = v4_sys.fnInit())
         return ret;
+
+    v4_venc_modparams();
 
     return EXIT_SUCCESS;
 }

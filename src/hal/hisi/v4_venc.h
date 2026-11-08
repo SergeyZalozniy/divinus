@@ -234,6 +234,48 @@ typedef struct {
     unsigned int reqIQp;
 } v4_venc_iref;
 
+// VENC_PARAM_MOD_S (hi_comm_venc.h / comm_venc.h of hi3516ev300 and gk7205v300)
+typedef enum {
+    V4_VENC_MODTYPE_VENC = 1,
+    V4_VENC_MODTYPE_H264E,
+    V4_VENC_MODTYPE_H265E,
+    V4_VENC_MODTYPE_JPEGE,
+    V4_VENC_MODTYPE_RC,
+    V4_VENC_MODTYPE_END
+} v4_venc_modtype;
+
+typedef struct {
+    unsigned int bufferCache;
+    unsigned int frameBufRecycle;
+} v4_venc_mod_venc;
+
+// VENC_MOD_H264E_S and VENC_MOD_H265E_S share this layout
+typedef struct {
+    unsigned int oneStreamBuf;
+    unsigned int miniBufMode;
+    unsigned int powerSaveOn;
+    int vbSource;
+    int qpHstgrmOn;
+} v4_venc_mod_h26x;
+
+typedef struct {
+    unsigned int oneStreamBuf;
+    unsigned int miniBufMode;
+    unsigned int clearStreamBuf;
+    unsigned int deringMode;
+} v4_venc_mod_jpeg;
+
+typedef struct {
+    v4_venc_modtype type;
+    union {
+        v4_venc_mod_venc venc;
+        v4_venc_mod_h26x h264e;
+        v4_venc_mod_h26x h265e;
+        v4_venc_mod_jpeg jpege;
+        unsigned int rcClrStatAfterSetBr;
+    };
+} v4_venc_mod;
+
 typedef struct {
     v4_venc_attrib attrib;
     v4_venc_rate rate;
@@ -395,6 +437,8 @@ typedef struct {
     int (*fnSetColorToGray)(int channel, int *active);
     int (*fnGetIntraRefresh)(int channel, v4_venc_iref *config);
     int (*fnSetIntraRefresh)(int channel, v4_venc_iref *config);
+    int (*fnGetModParam)(v4_venc_mod *param);
+    int (*fnSetModParam)(v4_venc_mod *param);
 
     int (*fnFreeDescriptor)(int channel);
     int (*fnGetDescriptor)(int channel);
@@ -492,6 +536,13 @@ static int v4_venc_load(v4_venc_impl *venc_lib) {
     if (!(venc_lib->fnSetIntraRefresh = (int(*)(int channel, v4_venc_iref *config))
         dlsym(venc_lib->handle, "HI_MPI_VENC_SetIntraRefresh")))
         HAL_INFO("v4_venc", "Intra refresh is not supported by this library!\n");
+
+    // Optional, without them the module parameters stay as loaded
+    venc_lib->fnGetModParam = (int(*)(v4_venc_mod *param))
+        dlsym(venc_lib->handle, "HI_MPI_VENC_GetModParam");
+    if (!(venc_lib->fnSetModParam = (int(*)(v4_venc_mod *param))
+        dlsym(venc_lib->handle, "HI_MPI_VENC_SetModParam")) || !venc_lib->fnGetModParam)
+        HAL_INFO("v4_venc", "Encoder module parameters are not supported by this library!\n");
 
     return EXIT_SUCCESS;
 }

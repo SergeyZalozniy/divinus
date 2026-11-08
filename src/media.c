@@ -949,6 +949,17 @@ int media_sub_enable(void) {
     return EXIT_SUCCESS;
 }
 
+/* A failed start must not leave encoder channels behind in the SDK, the
+   next start (or another streamer) could not create them again */
+static void sdk_start_cleanup(void) {
+    for (int i = 0; i < chnCount; i++) {
+        if (!chnState[i].enable) continue;
+        media_video_disable(i, chnState[i].payload == HAL_VIDCODEC_JPG ||
+            chnState[i].payload == HAL_VIDCODEC_MJPG);
+        chnState[i].enable = false;
+    }
+}
+
 int sdk_start(void) {
     int ret;
 
@@ -1152,14 +1163,20 @@ int sdk_start(void) {
         pthread_attr_destroy(&thread_attr);
     }
 
-    if (app_config.mp4_enable && (ret = media_mp4_enable()))
+    if (app_config.mp4_enable && (ret = media_mp4_enable())) {
+        sdk_start_cleanup();
         HAL_ERROR("media", "MP4 initialization failed with %#x!\n", ret);
+    }
 
-    if (app_config.mjpeg_enable && (ret = media_mjpeg_enable()))
+    if (app_config.mjpeg_enable && (ret = media_mjpeg_enable())) {
+        sdk_start_cleanup();
         HAL_ERROR("media", "MJPEG initialization failed with %#x!\n", ret);
+    }
 
-    if (app_config.jpeg_enable && (ret = jpeg_init()))
+    if (app_config.jpeg_enable && (ret = jpeg_init())) {
+        sdk_start_cleanup();
         HAL_ERROR("media", "JPEG initialization failed with %#x!\n", ret);
+    }
 
     /* Last, so the other channels keep the indexes they always had; a
        failing sub stream is not worth losing the main one over */

@@ -24,6 +24,7 @@ int jpeg_init() {
     jpeg_index = take_next_free_channel(false);
 
     if (ret = create_channel(jpeg_index, app_config.jpeg_width, app_config.jpeg_height, 1, 1)) {
+        chnState[jpeg_index].enable = false;
         pthread_mutex_unlock(&jpeg_mutex);
         HAL_ERROR("jpeg", "Creating channel %d failed with %#x!\n%s\n",
             jpeg_index, ret, errstr(ret));
@@ -65,6 +66,9 @@ int jpeg_init() {
         }
 
         if (ret) {
+            /* Release the channel before clearing the slot. */
+            media_video_disable(jpeg_index, 1);
+            chnState[jpeg_index].enable = false;
             pthread_mutex_unlock(&jpeg_mutex);
             HAL_ERROR("jpeg", "Creating encoder %d failed with %#x!\n%s\n",
                 jpeg_index, ret, errstr(ret));
