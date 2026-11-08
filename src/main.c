@@ -17,15 +17,24 @@
 
 rtsp_handle rtspHandle;
 volatile char graceful = 0, keepRunning = 1;
+/* Set from DIVINUS_CRASH_DISARM_WATCHDOG=1 by a supervisor that restarts
+   divinus after a crash (S95divinus on the IVG-G6S) */
+static volatile sig_atomic_t crash_disarm_watchdog = 0;
 
 void handle_error(int signo) {
-    char msg[64];
+    char msg[96];
     sprintf(msg, "Error occured (%d)! Quitting...\n", signo);
     write(STDERR_FILENO, msg, strlen(msg));
     keepRunning = 0;
     /* _exit(), not exit(): from a signal handler only async-signal-safe
-       calls are allowed, and skipping the atexit handlers leaves the
-       watchdog armed so a crash still ends in a reset */
+       calls are allowed. The atexit handlers are skipped, so the watchdog
+       stays armed and a crash ends in a reset, unless a supervisor that
+       restarts divinus asked for it to be disarmed */
+    if (crash_disarm_watchdog) {
+        watchdog_stop_from_signal();
+        static const char wd[] = "Watchdog disarmed after the crash\n";
+        write(STDERR_FILENO, wd, sizeof(wd) - 1);
+    }
     _exit(EXIT_FAILURE);
 }
 
@@ -36,6 +45,11 @@ void handle_exit(int signo) {
 }
 
 int main(int argc, char *argv[]) {
+    {
+        const char *disarm = getenv("DIVINUS_CRASH_DISARM_WATCHDOG");
+        crash_disarm_watchdog = disarm && !strcmp(disarm, "1");
+    }
+
     {
         struct sigaction sa;
         memset(&sa, 0, sizeof(sa));
@@ -68,8 +82,11 @@ int main(int argc, char *argv[]) {
     if (app_config_parse() != CONFIG_OK)
         HAL_ERROR("hal", "Can't load app config 'divinus.yaml'\n");
 
-    if (app_config.watchdog)
+    if (app_config.watchdog) {
         watchdog_start(app_config.watchdog);
+        if (crash_disarm_watchdog)
+            HAL_INFO("watchdog", "A crash disarms it (DIVINUS_CRASH_DISARM_WATCHDOG=1)\n");
+    }
 
     network_start();
 

@@ -12,3 +12,4 @@
 void watchdog_reset(void);
 int watchdog_start(int timeout);
 void watchdog_stop(void);
+void watchdog_stop_from_signal(void);

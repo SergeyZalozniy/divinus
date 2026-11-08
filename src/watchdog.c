@@ -23,12 +23,23 @@ int watchdog_start(int timeout) {
 
     /* Disarm on any normal exit from here on, including the error returns
        out of main(), so a startup failure does not end in a reset.  A fatal
-       signal leaves through _exit() in handle_error() and keeps it armed.
+       signal leaves through _exit() in handle_error() and keeps it armed,
+       unless DIVINUS_CRASH_DISARM_WATCHDOG=1 (watchdog_stop_from_signal()).
        watchdog_stop() is safe to call twice. */
     atexit(watchdog_stop);
 
     HAL_INFO("watchdog", "Watchdog started!\n");
     return EXIT_SUCCESS;
+}
+
+/* For a fatal-signal handler: only write() and close(), both
+   async-signal-safe, so it may run while another thread holds a lock */
+void watchdog_stop_from_signal(void) {
+    int wfd = fd;
+    if (!wfd) return;
+    fd = 0;
+    write(wfd, "V", 1);
+    close(wfd);
 }
 
 void watchdog_stop(void) {
