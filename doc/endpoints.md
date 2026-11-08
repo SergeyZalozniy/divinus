@@ -253,6 +253,56 @@ Configures the night mode parameters.
 }
 ```
 
+#### Majestic compatibility, for tools such as BlueOS Video Streams
+
+With `system.web_majestic_compat: true` (off by default) the server also answers the day/night subset of the HTTP API of majestic, OpenIPC's stock streamer, so tools written for it detect the camera and switch day/night unchanged. These routes sit behind the same authentication as every other endpoint, all changes are RAM only (like `/api/night`), and `/api/night` keeps working alongside them.
+
+| Request | Response (200) | Effect |
+|---------|----------------|--------|
+| `GET /api/v1/config.json` | JSON, see below | None |
+| `GET /metrics/night` | Prometheus text, see below | None |
+| `GET /night` | `1` (night) or `0` (day) | None |
+| `GET /night/on` | `1` | Manual mode, then night: grayscale on, IR-cut filter out, IR LEDs on |
+| `GET /night/off` | `0` | Manual mode, then day: grayscale off, IR-cut filter in, IR LEDs off |
+| `GET /night/toggle` | `1` or `0`, the new state | Manual mode, then the opposite of the current state |
+| `GET /api/v1/set?nightMode.lightMonitor=true` | `true` (or `false` when night mode is disabled in the config) | Automatic mode: the night thread restarts and the light sensor decides, like `/api/night?manual=false` |
+| `GET /api/v1/set?nightMode.lightMonitor=false` | `false` | Manual mode, keeping the current picture |
+| `GET /api/v1/set?<any other key>=...` | `OK` | Ignored |
+
+Bodies are `text/plain` without a trailing newline, except `config.json`. `/night/on` and `/night/off` only pulse the IR-cut coil when the state actually changes. `lightMonitor` is reported as `true` only while night mode is enabled and not in manual mode.
+
+`/api/v1/config.json` (pins at `999`, i.e. unused, read `null`):
+```json
+{
+  "nightMode": {
+    "enabled": true,
+    "lightMonitor": true,
+    "colorToGray": true,
+    "irCutPin1": 11,
+    "irCutPin2": 10,
+    "backlightPin": null,
+    "lightSensorPin": 65,
+    "lightSensorInvert": true,
+    "autoNightDelay": 20,
+    "autoDayDelay": 180,
+    "pinSwitchDelayUs": 150,
+    "night": false,
+    "manual": false
+  },
+  "system": { "webPort": 80, "streamer": "divinus" }
+}
+```
+
+`/metrics/night` (`# HELP`/`# TYPE` lines omitted here):
+```
+night_enabled 0
+night_mode_source 1
+ircut_enabled 1
+light_enabled 0
+grayscale_enabled 0
+```
+`night_enabled` is the current state (night when grayscale, filter out and IR LEDs on), `night_mode_source` is `0` in manual mode and `1` while the light sensor decides.
+
 ### On-Screen Display (OSD)
 
 #### `/api/osd/{id}`

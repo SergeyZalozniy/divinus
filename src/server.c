@@ -604,6 +604,140 @@ grant_access:
     req->payload = req->input + req->header_len;
 }
 
+/* Majestic (OpenIPC's stock streamer) compatible day/night API, so tools
+   written for it (e.g. BlueOS Video Streams) detect and drive the camera
+   unchanged. Only served with system.web_majestic_compat, behind the same
+   auth gate as everything else. All state is RAM only, like /api/night. */
+static void send_majestic(int fd, const char *type, const char *body) {
+    char response[1024];
+    int respLen = snprintf(response, sizeof(response),
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: %s\r\n"
+        "Content-Length: %u\r\n"
+        "Connection: close\r\n"
+        "\r\n"
+        "%s",
+        type, (unsigned int)strlen(body), body);
+    if (respLen >= (int)sizeof(response)) respLen = sizeof(response) - 1;
+    send_and_close(fd, response, respLen);
+}
+
+/* The sensor (or ADC) only decides when the night thread runs at all */
+static bool majestic_light_monitor(void) {
+    return app_config.night_mode_enable && !night_manual_on();
+}
+
+static bool majestic_in_state(bool night) {
+    return night ? night_mode_on() :
+        !night_grayscale_on() && night_ircut_on() && !night_irled_on();
+}
+
+/* Forces day or night until the light monitor is turned back on. The
+   night thread keeps running and ignores the sensor while manual, so no
+   restart is needed; the IR-cut coil is only pulsed on an actual change. */
+static void majestic_force(bool night) {
+    night_manual(1);
+    if (!majestic_in_state(night))
+        night_mode(night);
+}
+
+static void majestic_pin(char *buf, size_t size, int pin) {
+    if (pin == 999) snprintf(buf, size, "null");
+    else snprintf(buf, size, "%d", pin);
+}
+
+static bool respond_majestic(http_request_t *req) {
+    const char *uri = req->uri;
+
+    if (EQUALS(uri, "/night") || EQUALS(uri, "/night/on") ||
+        EQUALS(uri, "/night/off") || EQUALS(uri, "/night/toggle")) {
+        if (EQUALS(uri, "/night/on")) majestic_force(true);
+        else if (EQUALS(uri, "/night/off")) majestic_force(false);
+        else if (EQUALS(uri, "/night/toggle")) majestic_force(!night_mode_on());
+        send_majestic(req->clntFd, "text/plain", night_mode_on() ? "1" : "0");
+        return true;
+    }
+
+    if (EQUALS(uri, "/metrics/night")) {
+        char body[512];
+        snprintf(body, sizeof(body),
+            "# HELP night_enabled Night mode is active\n"
+            "# TYPE night_enabled gauge\n"
+            "night_enabled %d\n"
+            "# HELP night_mode_source What decides the mode: 0 manual (HTTP API), 1 light sensor\n"
+            "# TYPE night_mode_source gauge\n"
+            "night_mode_source %d\n"
+            "# HELP ircut_enabled IR-cut filter is in front of the sensor\n"
+            "# TYPE ircut_enabled gauge\n"
+            "ircut_enabled %d\n"
+            "# HELP light_enabled IR illuminator is on\n"
+            "# TYPE light_enabled gauge\n"
+            "light_enabled %d\n"
+            "# HELP grayscale_enabled Picture is grayscale\n"
+            "# TYPE grayscale_enabled gauge\n"
+            "grayscale_enabled %d\n",
+            night_mode_on() ? 1 : 0, majestic_light_monitor() ? 1 : 0,
+            night_ircut_on() ? 1 : 0, night_irled_on() ? 1 : 0,
+            night_grayscale_on() ? 1 : 0);
+        send_majestic(req->clntFd, "text/plain; version=0.0.4", body);
+        return true;
+    }
+
+    if (EQUALS(uri, "/api/v1/config.json")) {
+        char body[640], cut1[8], cut2[8], led[8], sense[8];
+        majestic_pin(cut1, sizeof(cut1), app_config.ir_cut_pin1);
+        majestic_pin(cut2, sizeof(cut2), app_config.ir_cut_pin2);
+        majestic_pin(led, sizeof(led), app_config.ir_led_pin);
+        majestic_pin(sense, sizeof(sense), app_config.ir_sensor_pin);
+        snprintf(body, sizeof(body),
+            "{\"nightMode\":{\"enabled\":%s,\"lightMonitor\":%s,\"colorToGray\":true,"
+            "\"irCutPin1\":%s,\"irCutPin2\":%s,\"backlightPin\":%s,"
+            "\"lightSensorPin\":%s,\"lightSensorInvert\":%s,"
+            "\"autoNightDelay\":%u,\"autoDayDelay\":%u,"
+            "\"pinSwitchDelayUs\":%u,\"night\":%s,\"manual\":%s},"
+            "\"system\":{\"webPort\":%u,\"streamer\":\"divinus\"}}",
+            app_config.night_mode_enable ? "true" : "false",
+            majestic_light_monitor() ? "true" : "false",
+            cut1, cut2, led, sense,
+            app_config.ir_sensor_invert ? "true" : "false",
+            app_config.night_delay_s, app_config.day_delay_s,
+            app_config.pin_switch_delay_us,
+            night_mode_on() ? "true" : "false", night_manual_on() ? "true" : "false",
+            app_config.web_port);
+        send_majestic(req->clntFd, "application/json", body);
+        return true;
+    }
+
+    if (EQUALS(uri, "/api/v1/set")) {
+        /* Only nightMode.lightMonitor is understood; any other majestic key
+           is accepted and ignored, so a stray one does not fail a client */
+        const char *answer = "OK";
+        while (req->query) {
+            char *value = split(&req->query, "&");
+            if (!value || !*value) continue;
+            unescape_uri(value);
+            char *key = split(&value, "=");
+            if (!key || !*key || !value || !*value) continue;
+            if (!EQUALS(key, "nightMode.lightMonitor")) continue;
+            if (EQUALS_CASE(value, "true") || EQUALS(value, "1")) {
+                /* Back to the sensor: restart the thread like /api/night
+                   does, so its first reading applies at once */
+                night_manual(0);
+                night_disable();
+                if (app_config.night_mode_enable) night_enable();
+            } else if (EQUALS_CASE(value, "false") || EQUALS(value, "0")) {
+                /* Manual, keeping the current picture */
+                night_manual(1);
+            }
+            answer = majestic_light_monitor() ? "true" : "false";
+        }
+        send_majestic(req->clntFd, "text/plain", answer);
+        return true;
+    }
+
+    return false;
+}
+
 void respond_request(http_request_t *req) {
     char response[8192] = {0};
     int respLen = 0;
@@ -1554,6 +1688,9 @@ void respond_request(http_request_t *req) {
         send_and_close(req->clntFd, response, respLen);
         return;
     }
+
+    if (app_config.web_majestic_compat && respond_majestic(req))
+        return;
 
     if (app_config.osd_enable && STARTS_WITH(req->uri, "/api/osd/")) {
         char *remain;

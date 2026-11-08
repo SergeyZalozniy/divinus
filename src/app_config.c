@@ -82,6 +82,7 @@ int app_config_save(void) {
     fprintf(file, "  web_auth_pass: %s\n", app_config.web_auth_pass);
     fprintf(file, "  web_auth_skiplocal: %s\n", app_config.web_auth_skiplocal ? "true" : "false");
     fprintf(file, "  web_enable_static: %s\n", app_config.web_enable_static ? "true" : "false");
+    fprintf(file, "  web_majestic_compat: %s\n", app_config.web_majestic_compat ? "true" : "false");
     fprintf(file, "  isp_thread_stack_size: %d\n", app_config.isp_thread_stack_size);
     fprintf(file, "  venc_stream_thread_stack_size: %d\n", app_config.venc_stream_thread_stack_size);
     fprintf(file, "  web_server_thread_stack_size: %d\n", app_config.web_server_thread_stack_size);
@@ -271,6 +272,7 @@ enum ConfigError app_config_parse(void) {
     app_config.web_enable_auth = false;
     app_config.web_auth_skiplocal = false;
     app_config.web_enable_static = false;
+    app_config.web_majestic_compat = false;
     app_config.isp_thread_stack_size = 16 * 1024;
     app_config.venc_stream_thread_stack_size = 16 * 1024;
     app_config.web_server_thread_stack_size = 32 * 1024;
@@ -393,6 +395,7 @@ enum ConfigError app_config_parse(void) {
     parse_param_value(
         &ini, "system", "web_auth_pass", app_config.web_auth_pass);
     parse_bool(&ini, "system", "web_auth_skiplocal", &app_config.web_auth_skiplocal);
+    parse_bool(&ini, "system", "web_majestic_compat", &app_config.web_majestic_compat);
     err = parse_bool(
         &ini, "system", "web_enable_static", &app_config.web_enable_static);
     if (err != CONFIG_OK)

@@ -21,6 +21,7 @@ struct AppConfig {
     char web_auth_pass[32];
     bool web_auth_skiplocal;
     bool web_enable_static;
+    bool web_majestic_compat;
     unsigned int isp_thread_stack_size;
     unsigned int venc_stream_thread_stack_size;
     unsigned int web_server_thread_stack_size;

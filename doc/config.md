@@ -12,6 +12,7 @@ This document describes the fields that can be found within a configuration file
 - **web_auth_pass**: Password for basic authentication (default: `12345`).
 - **web_auth_skiplocal**: Boolean to skip authentication for local addresses (default: `true`).
 - **web_enable_static**: Boolean to enable serving static web content (default: `false`).
+- **web_majestic_compat**: Boolean to also serve the day/night subset of majestic's HTTP API (`/api/v1/config.json`, `/metrics/night`, `/night/on|off|toggle`, `/api/v1/set?nightMode.lightMonitor=`), for tools such as BlueOS Video Streams that only know OpenIPC's stock streamer; see the endpoints reference (default: `false`).
 - **isp_thread_stack_size**: Stack size for ISP thread, if applicable (default: `16384`).
 - **venc_stream_thread_stack_size**: Stack size for video encoding stream thread (default: `16384`).
 - **web_server_thread_stack_size**: Stack size for web server thread (default: `65536`).
