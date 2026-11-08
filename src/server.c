@@ -1341,6 +1341,19 @@ void respond_request(http_request_t *req) {
                     short result = strtol(value, &remain, 10);
                     if (remain != value)
                         app_config.ir_sensor_pin = result;
+                } else if (EQUALS(key, "irsense_invert")) {
+                    if (EQUALS_CASE(value, "true") || EQUALS(value, "1"))
+                        app_config.ir_sensor_invert = 1;
+                    else if (EQUALS_CASE(value, "false") || EQUALS(value, "0"))
+                        app_config.ir_sensor_invert = 0;
+                } else if (EQUALS(key, "night_delay_s")) {
+                    long result;
+                    if (parse_ranged(value, 0, 3600, &result))
+                        app_config.night_delay_s = result;
+                } else if (EQUALS(key, "day_delay_s")) {
+                    long result;
+                    if (parse_ranged(value, 0, 3600, &result))
+                        app_config.day_delay_s = result;
                 } else if (EQUALS(key, "manual")) {
                     if (EQUALS_CASE(value, "true") || EQUALS(value, "1"))
                         night_manual(1);
@@ -1358,11 +1371,14 @@ void respond_request(http_request_t *req) {
             "Connection: close\r\n"
             "\r\n"
             "{\"active\":%s,\"manual\":%s,\"grayscale\":%s,\"ircut\":%s,\"ircut_pin1\":%d,\"ircut_pin2\":%d,"
-            "\"irled\":%s,\"irled_pin\":%d,\"irsense_pin\":%d,\"adc_device\":\"%s\",\"adc_threshold\":%d}",
+            "\"irled\":%s,\"irled_pin\":%d,\"irsense_pin\":%d,\"irsense_invert\":%s,"
+            "\"night_delay_s\":%d,\"day_delay_s\":%d,\"adc_device\":\"%s\",\"adc_threshold\":%d}",
             app_config.night_mode_enable ? "true" : "false", night_manual_on() ? "true" : "false",
             night_grayscale_on() ? "true" : "false",
             night_ircut_on() ? "true" : "false", app_config.ir_cut_pin1, app_config.ir_cut_pin2,
             night_irled_on() ? "true" : "false", app_config.ir_led_pin, app_config.ir_sensor_pin,
+            app_config.ir_sensor_invert ? "true" : "false",
+            app_config.night_delay_s, app_config.day_delay_s,
             app_config.adc_device, app_config.adc_threshold);
         send_and_close(req->clntFd, response, respLen);
         return;

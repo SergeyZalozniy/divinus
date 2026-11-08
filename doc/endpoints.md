@@ -206,6 +206,9 @@ Configures the night mode parameters.
 | GET    | `irled`        | Control IR LEDs           |
 | GET    | `irled_pin`    | GPIO pin for IR LEDs      |
 | GET    | `irsense_pin`  | GPIO pin for IR sensor    |
+| GET    | `irsense_invert` | Low sensor level = night |
+| GET    | `night_delay_s`| Darkness hold before night|
+| GET    | `day_delay_s`  | Daylight hold before day  |
 | GET    | `adc_device`   | ADC device                |
 | GET    | `adc_threshold`| Activation threshold      |
 
@@ -221,6 +224,9 @@ Configures the night mode parameters.
   "irled": true,
   "irled_pin": 20,
   "irsense_pin": 21,
+  "irsense_invert": false,
+  "night_delay_s": 20,
+  "day_delay_s": 60,
   "adc_device": "/dev/adc",
   "adc_threshold": 800
 }

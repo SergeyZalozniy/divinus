@@ -48,6 +48,40 @@ static void night_lamp(bool enable) {
 
 void night_manual(bool enable) { manual = enable; }
 
+static bool sensed = false;
+static unsigned int pending = 0;
+
+/* Feeds one sensor reading (true = dark) taken step_s seconds after the
+ * previous one. The first reading after the thread starts applies at once;
+ * afterwards the mode only flips once the readings have disagreed with the
+ * active mode for night_delay_s (going dark) or day_delay_s (going bright)
+ * seconds in a row. With both delays at 0 it flips on the first differing
+ * reading, and an unchanged reading no longer re-pulses the IR-cut coil. */
+static void night_sense(bool dark, unsigned int step_s) {
+    if (manual || dark == night_mode_on()) {
+        sensed = true;
+        pending = 0;
+        return;
+    }
+
+    if (!sensed) {
+        sensed = true;
+        pending = 0;
+        night_mode(dark);
+        return;
+    }
+
+    unsigned int delay = dark ? app_config.night_delay_s : app_config.day_delay_s;
+    if (pending >= delay) {
+        pending = 0;
+        night_mode(dark);
+    } else {
+        HAL_INFO("night", "Sensor reads %s, switching in %us unless it changes back\n",
+            dark ? "dark" : "bright", delay - pending);
+        pending += step_s ? step_s : 1;
+    }
+}
+
 void night_mode(bool enable) {
     HAL_INFO("night", "Changing mode to %s\n", enable ? "NIGHT" : "DAY");
 #if defined(__arm__) && !defined(__ARM_PCS_VFP) && __ARM_ARCH == 6
@@ -80,6 +114,9 @@ void night_mode(bool enable) {
 void *night_thread(void) {
     gpio_init();
     usleep(10000);
+
+    sensed = false;
+    pending = 0;
 
     if (!manual) night_mode(night_mode_on());
     else night_lamp(night_mode_on());
@@ -114,7 +151,9 @@ void *night_thread(void) {
             }
             if (cnt == 12) {
                 tmp /= cnt;
-                if (!manual) night_mode(tmp >= app_config.adc_threshold);
+                bool dark = tmp >= app_config.adc_threshold;
+                night_sense(app_config.ir_sensor_invert ? !dark : dark,
+                    app_config.check_interval_s);
                 cnt = tmp = 0;
             }
             usleep(app_config.check_interval_s * 1000000 / 12);
@@ -123,12 +162,17 @@ void *night_thread(void) {
     } else if (app_config.ir_sensor_pin == 999) {
         while (keepRunning && nightOn) sleep(1);
     } else {
-        while (keepRunning) {
+        while (keepRunning && nightOn) {
             bool state = false;
             if (!gpio_read(app_config.ir_sensor_pin, &state))
-                if (!manual) night_mode(state);
+                night_sense(app_config.ir_sensor_invert ? !state : state,
+                    app_config.check_interval_s);
 
-            sleep(app_config.check_interval_s);
+            /* Sleep in short steps so a shutdown or a reconfiguration
+               does not wait for a whole check interval */
+            for (unsigned int i = 0; i < app_config.check_interval_s &&
+                keepRunning && nightOn; i++)
+                sleep(1);
         }
     }
 

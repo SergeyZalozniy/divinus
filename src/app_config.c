@@ -97,7 +97,10 @@ int app_config_save(void) {
     fprintf(file, "night_mode:\n");
     fprintf(file, "  enable: %s\n", app_config.night_mode_enable ? "true" : "false");
     fprintf(file, "  ir_sensor_pin: %d\n", app_config.ir_sensor_pin);
+    fprintf(file, "  ir_sensor_invert: %s\n", app_config.ir_sensor_invert ? "true" : "false");
     fprintf(file, "  check_interval_s: %d\n", app_config.check_interval_s);
+    fprintf(file, "  night_delay_s: %d\n", app_config.night_delay_s);
+    fprintf(file, "  day_delay_s: %d\n", app_config.day_delay_s);
     fprintf(file, "  ir_cut_pin1: %d\n", app_config.ir_cut_pin1);
     fprintf(file, "  ir_cut_pin2: %d\n", app_config.ir_cut_pin2);
     fprintf(file, "  ir_led_pin: %d\n", app_config.ir_led_pin);
@@ -296,6 +299,9 @@ enum ConfigError app_config_parse(void) {
     app_config.ir_led_pin = 999;
     app_config.pin_switch_delay_us = 250;
     app_config.check_interval_s = 10;
+    app_config.ir_sensor_invert = false;
+    app_config.night_delay_s = 0;
+    app_config.day_delay_s = 0;
     app_config.adc_device[0] = 0;
     app_config.night_lamp = HAL_LIGHT_IR;
     app_config.adc_threshold = 128;
@@ -370,9 +376,17 @@ enum ConfigError app_config_parse(void) {
                 (pin <= PIN_MAX || pin == 999))
                 app_config.ir_sensor_pin = pin;
         }
+        parse_bool(&ini, "night_mode", "ir_sensor_invert",
+            &app_config.ir_sensor_invert);
         parse_int(
             &ini, "night_mode", "check_interval_s", 0, 600,
             &app_config.check_interval_s);
+        parse_int(
+            &ini, "night_mode", "night_delay_s", 0, 3600,
+            &app_config.night_delay_s);
+        parse_int(
+            &ini, "night_mode", "day_delay_s", 0, 3600,
+            &app_config.day_delay_s);
         parse_int(
             &ini, "night_mode", "ir_cut_pin1", 0, PIN_MAX,
             &app_config.ir_cut_pin1);

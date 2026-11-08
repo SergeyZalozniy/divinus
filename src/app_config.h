@@ -32,7 +32,10 @@ struct AppConfig {
     unsigned int ir_cut_pin2;
     unsigned int ir_led_pin;
     unsigned int ir_sensor_pin;
+    bool ir_sensor_invert;
     unsigned int check_interval_s;
+    unsigned int night_delay_s;
+    unsigned int day_delay_s;
     unsigned int pin_switch_delay_us;
     char adc_device[128];
     hal_light night_lamp;
