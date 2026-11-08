@@ -89,6 +89,10 @@ This document describes the fields that can be found within a configuration file
 - **gop**: Interval between keyframes.
 - **profile**: Encoding profile.
 - **bitrate**: Bitrate in kbps.
+- **intra_refresh**: Boolean to turn on gradual intra refresh (GDR) for H.264/H.265, spreading intra coding over consecutive frames instead of large periodic keyframes; only on HiSilicon/Goke v4 (Hi3516EV200/300, GK7205V200/300) at the moment (default: `false`).
+- **intra_refresh_mode**: Direction of the refresh sweep, `row` or `column` (default: `row`).
+- **intra_refresh_num**: Number of rows or columns intra coded per frame (default: `1`).
+- **intra_refresh_qp**: QP for the requested I-frames, 0-51 (default: `0`).
 
 ## OSD section
 

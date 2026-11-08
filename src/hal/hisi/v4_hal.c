@@ -688,6 +688,25 @@ int v4_video_create(char index, hal_vidconfig *config)
     if (ret = v4_venc.fnCreateChannel(index, &channel))
         return ret;
 
+    if ((config->codec == HAL_VIDCODEC_H264 || config->codec == HAL_VIDCODEC_H265) &&
+        config->intraRefresh) {
+        if (!v4_venc.fnSetIntraRefresh)
+            HAL_WARNING("v4_venc", "Intra refresh is unavailable on this library!\n");
+        else {
+            v4_venc_iref iref = { .enable = 1,
+                .mode = config->intraRefreshMode == HAL_IREFMODE_COLUMN ?
+                    V4_VENC_INTRAREFRESH_COLUMN : V4_VENC_INTRAREFRESH_ROW,
+                .num = config->intraRefreshNum, .reqIQp = config->intraRefreshQp };
+            if (ret = v4_venc.fnSetIntraRefresh(index, &iref))
+                HAL_WARNING("v4_venc", "Enabling intra refresh on channel %d "
+                    "failed with %#x!\n", index, ret);
+            else
+                HAL_INFO("v4_venc", "Intra refresh enabled on channel %d "
+                    "(%s, %u, QP %u)\n", index, iref.mode ? "column" : "row",
+                    iref.num, iref.reqIQp);
+        }
+    }
+
     {
         int count = -1;
         if (config->codec != HAL_VIDCODEC_JPG &&

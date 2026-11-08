@@ -92,6 +92,10 @@ struct AppConfig {
     unsigned int mp4_height;
     unsigned int mp4_profile;
     unsigned int mp4_bitrate;
+    bool mp4_intraRefresh;
+    unsigned int mp4_intraRefreshMode;
+    unsigned int mp4_intraRefreshNum;
+    unsigned int mp4_intraRefreshQp;
 
     // [jpeg]
     bool jpeg_enable;

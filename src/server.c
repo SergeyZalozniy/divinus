@@ -1153,6 +1153,24 @@ void respond_request(http_request_t *req) {
                         app_config.mp4_profile = HAL_VIDPROFILE_MAIN;
                     else if (EQUALS_CASE(value, "HP") || EQUALS_CASE(value, "HIGH"))
                         app_config.mp4_profile = HAL_VIDPROFILE_HIGH;
+                } else if (EQUALS(key, "intra_refresh")) {
+                    if (EQUALS_CASE(value, "true") || EQUALS(value, "1"))
+                        app_config.mp4_intraRefresh = 1;
+                    else if (EQUALS_CASE(value, "false") || EQUALS(value, "0"))
+                        app_config.mp4_intraRefresh = 0;
+                } else if (EQUALS(key, "intra_refresh_mode")) {
+                    if (EQUALS_CASE(value, "ROW"))
+                        app_config.mp4_intraRefreshMode = HAL_IREFMODE_ROW;
+                    else if (EQUALS_CASE(value, "COLUMN"))
+                        app_config.mp4_intraRefreshMode = HAL_IREFMODE_COLUMN;
+                } else if (EQUALS(key, "intra_refresh_num")) {
+                    short result = strtol(value, &remain, 10);
+                    if (remain != value && result > 0)
+                        app_config.mp4_intraRefreshNum = result;
+                } else if (EQUALS(key, "intra_refresh_qp")) {
+                    short result = strtol(value, &remain, 10);
+                    if (remain != value && result >= 0 && result <= 51)
+                        app_config.mp4_intraRefreshQp = result;
                 }
             }
 
@@ -1183,9 +1201,14 @@ void respond_request(http_request_t *req) {
             "Connection: close\r\n"
             "\r\n"
             "{\"enable\":%s,\"width\":%d,\"height\":%d,\"fps\":%d,\"gop\":%d,"
-            "\"h265\":%s,\"mode\":\"%s\",\"profile\":\"%s\",\"bitrate\":%d}",
+            "\"h265\":%s,\"mode\":\"%s\",\"profile\":\"%s\",\"bitrate\":%d,"
+            "\"intra_refresh\":%s,\"intra_refresh_mode\":\"%s\",\"intra_refresh_num\":%d,"
+            "\"intra_refresh_qp\":%d}",
             app_config.mp4_enable ? "true" : "false", app_config.mp4_width, app_config.mp4_height,
-            app_config.mp4_fps, app_config.mp4_gop, h265, mode, profile, app_config.mp4_bitrate);
+            app_config.mp4_fps, app_config.mp4_gop, h265, mode, profile, app_config.mp4_bitrate,
+            app_config.mp4_intraRefresh ? "true" : "false",
+            app_config.mp4_intraRefreshMode == HAL_IREFMODE_COLUMN ? "column" : "row",
+            app_config.mp4_intraRefreshNum, app_config.mp4_intraRefreshQp);
         send_and_close(req->clntFd, response, respLen);
         return;
     }

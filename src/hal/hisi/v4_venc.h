@@ -23,6 +23,12 @@ typedef enum {
 } v4_venc_gopmode;
 
 typedef enum {
+    V4_VENC_INTRAREFRESH_ROW,
+    V4_VENC_INTRAREFRESH_COLUMN,
+    V4_VENC_INTRAREFRESH_END
+} v4_venc_irefmode;
+
+typedef enum {
     V4_VENC_NALU_H264_BSLICE,
     V4_VENC_NALU_H264_PSLICE,
     V4_VENC_NALU_H264_ISLICE,
@@ -222,6 +228,13 @@ typedef struct {
 } v4_venc_gop;
 
 typedef struct {
+    int enable;
+    v4_venc_irefmode mode;
+    unsigned int num;
+    unsigned int reqIQp;
+} v4_venc_iref;
+
+typedef struct {
     v4_venc_attrib attrib;
     v4_venc_rate rate;
     v4_venc_gop gop;
@@ -380,6 +393,8 @@ typedef struct {
     int (*fnSetChannelConfig)(int channel, v4_venc_chn *config);
     int (*fnSetChannelParam)(int channel, v4_venc_para *config);
     int (*fnSetColorToGray)(int channel, int *active);
+    int (*fnGetIntraRefresh)(int channel, v4_venc_iref *config);
+    int (*fnSetIntraRefresh)(int channel, v4_venc_iref *config);
 
     int (*fnFreeDescriptor)(int channel);
     int (*fnGetDescriptor)(int channel);
@@ -470,6 +485,13 @@ static int v4_venc_load(v4_venc_impl *venc_lib) {
     if (!(venc_lib->fnStopReceiving = (int(*)(int channel))
         hal_symbol_load("v4_venc", venc_lib->handle, "HI_MPI_VENC_StopRecvFrame")))
         return EXIT_FAILURE;
+
+    // Optional, a missing intra refresh only disables the feature
+    venc_lib->fnGetIntraRefresh = (int(*)(int channel, v4_venc_iref *config))
+        dlsym(venc_lib->handle, "HI_MPI_VENC_GetIntraRefresh");
+    if (!(venc_lib->fnSetIntraRefresh = (int(*)(int channel, v4_venc_iref *config))
+        dlsym(venc_lib->handle, "HI_MPI_VENC_SetIntraRefresh")))
+        HAL_INFO("v4_venc", "Intra refresh is not supported by this library!\n");
 
     return EXIT_SUCCESS;
 }

@@ -171,6 +171,10 @@ int app_config_save(void) {
     fprintf(file, "  gop: %d\n", app_config.mp4_gop);
     fprintf(file, "  profile: %d\n", app_config.mp4_profile);
     fprintf(file, "  bitrate: %d\n", app_config.mp4_bitrate);
+    fprintf(file, "  intra_refresh: %s\n", app_config.mp4_intraRefresh ? "true" : "false");
+    fprintf(file, "  intra_refresh_mode: %s\n", app_config.mp4_intraRefreshMode ? "column" : "row");
+    fprintf(file, "  intra_refresh_num: %d\n", app_config.mp4_intraRefreshNum);
+    fprintf(file, "  intra_refresh_qp: %d\n", app_config.mp4_intraRefreshQp);
 
     fprintf(file, "osd:\n");
     fprintf(file, "  enable: %s\n", app_config.osd_enable ? "true" : "false");
@@ -269,6 +273,10 @@ enum ConfigError app_config_parse(void) {
     app_config.audio_gain = 0;
     app_config.jpeg_enable = false;
     app_config.mp4_enable = false;
+    app_config.mp4_intraRefresh = false;
+    app_config.mp4_intraRefreshMode = HAL_IREFMODE_ROW;
+    app_config.mp4_intraRefreshNum = 1;
+    app_config.mp4_intraRefreshQp = 0;
 
     app_config.mjpeg_enable = false;
     app_config.mjpeg_fps = 15;
@@ -561,6 +569,20 @@ enum ConfigError app_config_parse(void) {
             &ini, "mp4", "bitrate", 32, INT_MAX, &app_config.mp4_bitrate);
         if (err != CONFIG_OK)
             goto RET_ERR;
+
+        parse_bool(&ini, "mp4", "intra_refresh", &app_config.mp4_intraRefresh);
+        {
+            const char *possible_values[] = {"ROW", "COLUMN"};
+            const int count = sizeof(possible_values) / sizeof(const char *);
+            int val = HAL_IREFMODE_ROW;
+            parse_enum(&ini, "mp4", "intra_refresh_mode", (void *)&val,
+                possible_values, count, 0);
+            app_config.mp4_intraRefreshMode = val;
+        }
+        parse_int(&ini, "mp4", "intra_refresh_num", 1, INT_MAX,
+            &app_config.mp4_intraRefreshNum);
+        parse_int(&ini, "mp4", "intra_refresh_qp", 0, 51,
+            &app_config.mp4_intraRefreshQp);
     }
 
     err = parse_bool(&ini, "jpeg", "enable", &app_config.jpeg_enable);

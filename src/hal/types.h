@@ -57,6 +57,11 @@ typedef enum {
 } hal_vidprofile;
 
 typedef enum {
+    HAL_IREFMODE_ROW,
+    HAL_IREFMODE_COLUMN
+} hal_irefmode;
+
+typedef enum {
     HAL_LIGHT_NONE  = 0,
     HAL_LIGHT_IR    = 1 << 0,
     HAL_LIGHT_WHITE = 1 << 1
@@ -104,6 +109,9 @@ typedef struct {
     hal_vidprofile profile;
     unsigned char gop, framerate, minQual, maxQual;
     unsigned short bitrate, maxBitrate;
+    char intraRefresh;
+    hal_irefmode intraRefreshMode;
+    unsigned int intraRefreshNum, intraRefreshQp;
 } hal_vidconfig;
 
 typedef struct {
