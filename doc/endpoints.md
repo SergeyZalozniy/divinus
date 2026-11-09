@@ -176,7 +176,8 @@ Configures the H.26x MP4 stream.
   "intra_refresh_qp": 0,
   "ip_qp_delta": "auto",
   "intra_refresh_active": false,
-  "intra_refresh_num_effective": 0
+  "intra_refresh_num_effective": 0,
+  "crop": null
 }
 ```
 
@@ -191,6 +192,14 @@ frame.
 when the GOP is shorter than the sweep, divinus raises the per-frame count for that channel to
 `ceil(lines / gop)` and logs a warning with the requested and the used value; the stored `intra_refresh_num` is
 not changed. Example: 1280x960 H.265 = 30 rows, `gop=23` runs with 2 rows per frame (`intra_refresh_num_effective: 2`).
+
+**Output aspect vs. capture aspect.** When `width`/`height` differ from the capture aspect by more than 1 %, the
+stream is a centred crop of the capture with square pixels, not a squeezed full frame (HiSilicon/Goke v4 only;
+JPEG/MJPEG are not cropped). A 16:9 stream from a 4:3 sensor loses the top and bottom, a narrower one the sides.
+`crop` reports the used window in capture pixels, e.g. `{"w":1296,"h":728,"x":0,"y":122}` for 1280x720 from a
+1296x972 capture, or `null` for a plain scale (e.g. 1280x960, 960x720, 640x480). The main stream is cropped by the
+encoder (VENC channel crop); the sub stream's VPSS channel scales to the capture-aspect box around its size
+(640x480 for 640x360) and crops that, so each stream has its own aspect.
 
 #### `/api/sub`
 

@@ -32,6 +32,17 @@ typedef struct {
     v4_common_rect aspectRect;
 } v4_vpss_chn;
 
+typedef enum {
+    V4_VPSS_CROPCOORD_RATIO,
+    V4_VPSS_CROPCOORD_ABS
+} v4_vpss_cropcoord;
+
+typedef struct {
+    int enable;
+    v4_vpss_cropcoord coord;
+    v4_common_rect rect;
+} v4_vpss_crop;
+
 typedef struct {
     v4_vpss_nmode mode;
     v4_common_compr compress;
@@ -61,6 +72,7 @@ typedef struct {
     int (*fnDisableChannel)(int group, int channel);
     int (*fnEnableChannel)(int group, int channel);
     int (*fnSetChannelConfig)(int group, int channel, v4_vpss_chn *config);
+    int (*fnSetChannelCrop)(int group, int channel, v4_vpss_crop *config);
 } v4_vpss_impl;
 
 static int v4_vpss_load(v4_vpss_impl *vpss_lib) {
@@ -105,6 +117,10 @@ static int v4_vpss_load(v4_vpss_impl *vpss_lib) {
     if (!(vpss_lib->fnSetChannelConfig = (int(*)(int group, int channel, v4_vpss_chn *config))
         hal_symbol_load("v4_vpss", vpss_lib->handle, "HI_MPI_VPSS_SetChnAttr")))
         return EXIT_FAILURE;
+
+    // Optional, without it a scaled channel cannot crop to another aspect
+    vpss_lib->fnSetChannelCrop = (int(*)(int group, int channel, v4_vpss_crop *config))
+        dlsym(vpss_lib->handle, "HI_MPI_VPSS_SetChnCrop");
 
     return EXIT_SUCCESS;
 }

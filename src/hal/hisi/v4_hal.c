@@ -38,6 +38,11 @@ static struct {
 } _v4_vb_extra[V4_VB_EXTRA_MAX];
 static int _v4_vb_extra_num = 0;
 
+/* Attributes of each VPSS channel, to tell capture-sized channels (the
+   encoder scales) from scaled ones (VPSS already scaled) and to resize
+   the latter for a crop */
+static v4_vpss_chn _v4_vpss_attr[V4_VENC_CHN_NUM];
+
 void v4_hal_deinit(void)
 {
     v4_vpss_unload(&v4_vpss);
@@ -188,6 +193,19 @@ int v4_channel_create_scaled(char index, short width, short height,
         channel.flip = flip;
         if (ret = v4_vpss.fnSetChannelConfig(_v4_vpss_grp, index, &channel))
             return ret;
+        if (index >= 0 && index < V4_VENC_CHN_NUM)
+            _v4_vpss_attr[(int)index] = channel;
+    }
+
+    /* A crop left from a previous user of this channel must go, an encoder
+       that needs one sets it again in v4_video_create */
+    if (v4_vpss.fnSetChannelCrop) {
+        /* The SDK checks the rect even when disabling */
+        v4_vpss_crop crop = { .enable = 0, .coord = V4_VPSS_CROPCOORD_ABS,
+            .rect = { .x = 0, .y = 0, .width = width, .height = height } };
+        if (ret = v4_vpss.fnSetChannelCrop(_v4_vpss_grp, index, &crop))
+            HAL_WARNING("v4_vpss", "Clearing the crop of channel %d failed "
+                "with %#x!\n", index, ret);
     }
 
     return EXIT_SUCCESS;
@@ -638,6 +656,149 @@ int v4_sensor_init(char *name, char *obj)
     return EXIT_SUCCESS;
 }
 
+/* Smallest box of the capture aspect around width x height (even sizes),
+ * e.g. 640x480 around 640x360 for a 4:3 sensor */
+static void v4_video_capturebox(unsigned int width, unsigned int height,
+    unsigned int *boxWidth, unsigned int *boxHeight)
+{
+    unsigned int captW = v4_config.isp.capt.width,
+        captH = v4_config.isp.capt.height;
+
+    *boxWidth = width;
+    *boxHeight = height;
+    if (!captW || !captH) return;
+    if ((unsigned long long)width * captH > (unsigned long long)height * captW)
+        *boxHeight = ALIGN_UP(width * captH / captW, 2);
+    else
+        *boxWidth = ALIGN_UP(height * captW / captH, 2);
+}
+
+/* Centred crop of a width x height picture to the aspect of the encoded
+ * size, so the output keeps square pixels instead of being squeezed;
+ * 0 when both aspects match within 1 % (plain scale) */
+static int v4_video_cropcentre(unsigned int width, unsigned int height,
+    unsigned int outW, unsigned int outH, unsigned int align, v4_common_rect *rect)
+{
+    long long out = (long long)outW * height, in = (long long)outH * width;
+
+    if ((out > in ? out - in : in - out) * 100 <= in) return 0;
+
+    if (out > in) {
+        rect->width = width;
+        rect->height = ALIGN_BACK(width * outH / outW, 2);
+        rect->x = 0;
+        rect->y = ALIGN_BACK((height - rect->height) / 2, align);
+    } else {
+        rect->width = ALIGN_BACK(height * outW / outH, 2);
+        rect->height = height;
+        rect->x = ALIGN_BACK((width - rect->width) / 2, align);
+        rect->y = 0;
+    }
+
+    return 1;
+}
+
+/* Per channel, so main and sub can have different aspects:
+ * - capture-sized VPSS channel (main stream): the encoder crops the
+ *   capture before its own scaling (VENC ChnParam crop);
+ * - scaled channel (sub stream): VPSS crops AFTER scaling on this SDK, so
+ *   the channel scales to the capture-aspect box around the encoded size
+ *   and crops that to the encoded size.
+ * Origins go even first, then 16-aligned. The rect kept for the API is in
+ * capture coordinates either way. */
+static void v4_video_crop(char index, hal_vidconfig *config)
+{
+    int ret = EXIT_FAILURE;
+    char scaled;
+    unsigned int width, height, captW = v4_config.isp.capt.width,
+        captH = v4_config.isp.capt.height;
+    v4_common_rect rect;
+    static const unsigned int aligns[] = { 2, 16 };
+    v4_vpss_chn *channel = &_v4_vpss_attr[(int)index];
+
+    v4_state[index].cropOn = 0;
+    if (config->codec != HAL_VIDCODEC_H264 && config->codec != HAL_VIDCODEC_H265)
+        return;
+    if (!captW || !captH || !channel->dest.width || !channel->dest.height)
+        return;
+
+    scaled = channel->dest.width == config->width &&
+        channel->dest.height == config->height;
+    if (scaled)
+        v4_video_capturebox(config->width, config->height, &width, &height);
+    else {
+        width = channel->dest.width;
+        height = channel->dest.height;
+    }
+
+    if (!v4_video_cropcentre(width, height, config->width, config->height,
+        aligns[0], &rect))
+        return;
+
+    if (scaled) {
+        if (!v4_vpss.fnSetChannelCrop) {
+            HAL_WARNING("v4_vpss", "Channel crop is unavailable on this library, "
+                "channel %d is scaled to %ux%u!\n", index, config->width,
+                config->height);
+            return;
+        }
+        channel->dest.width = width;
+        channel->dest.height = height;
+        if (ret = v4_vpss.fnSetChannelConfig(_v4_vpss_grp, index, channel)) {
+            HAL_WARNING("v4_vpss", "Resizing channel %d to %ux%u failed with "
+                "%#x!\n", index, width, height, ret);
+            channel->dest.width = config->width;
+            channel->dest.height = config->height;
+            v4_vpss.fnSetChannelConfig(_v4_vpss_grp, index, channel);
+            return;
+        }
+    }
+
+    for (int i = 0; i < 2; i++) {
+        v4_video_cropcentre(width, height, config->width, config->height,
+            aligns[i], &rect);
+        if (scaled) {
+            /* Exactly the encoded size out of the box */
+            rect.width = config->width;
+            rect.height = config->height;
+            rect.x = ALIGN_BACK((width - rect.width) / 2, aligns[i]);
+            rect.y = ALIGN_BACK((height - rect.height) / 2, aligns[i]);
+            v4_vpss_crop crop = { .enable = 1, .coord = V4_VPSS_CROPCOORD_ABS,
+                .rect = rect };
+            ret = v4_vpss.fnSetChannelCrop(_v4_vpss_grp, index, &crop);
+        } else {
+            v4_venc_para param;
+            if (!(ret = v4_venc.fnGetChannelParam(index, &param))) {
+                param.cropOn = 1;
+                param.crop = rect;
+                ret = v4_venc.fnSetChannelParam(index, &param);
+            }
+        }
+        if (!ret) break;
+        HAL_WARNING("v4_venc", "Cropping channel %d to %ux%u at %d,%d of %ux%u "
+            "failed with %#x!\n", index, rect.width, rect.height, rect.x,
+            rect.y, width, height, ret);
+    }
+    if (ret) {
+        if (scaled) {
+            channel->dest.width = config->width;
+            channel->dest.height = config->height;
+            v4_vpss.fnSetChannelConfig(_v4_vpss_grp, index, channel);
+        }
+        return;
+    }
+
+    HAL_INFO("v4_venc", "Channel %d crops %ux%u at %d,%d of %ux%u (%s) "
+        "for %ux%u\n", index, rect.width, rect.height, rect.x, rect.y,
+        width, height, scaled ? "VPSS" : "VENC", config->width, config->height);
+
+    v4_state[index].cropOn = 1;
+    v4_state[index].cropX = rect.x * captW / width;
+    v4_state[index].cropY = rect.y * captH / height;
+    v4_state[index].cropW = rect.width * captW / width;
+    v4_state[index].cropH = rect.height * captH / height;
+}
+
 /* QP delta between I and P frames (-10 to 30). Automatic: gop / fps as
  * before, but 0 with intra refresh, where the GOP start is not a keyframe
  * and a lower QP there only inflates that one frame. */
@@ -755,6 +916,8 @@ int v4_video_create(char index, hal_vidconfig *config)
     v4_state[index].irefActive = 0;
     v4_state[index].irefNum = 0;
 
+    v4_video_crop(index, config);
+
     if ((config->codec == HAL_VIDCODEC_H264 || config->codec == HAL_VIDCODEC_H265) &&
         config->intraRefresh) {
         if (!v4_venc.fnSetIntraRefresh)
@@ -820,6 +983,7 @@ int v4_video_destroy(char index)
     v4_state[index].payload = HAL_VIDCODEC_UNSPEC;
     v4_state[index].irefActive = 0;
     v4_state[index].irefNum = 0;
+    v4_state[index].cropOn = 0;
 
     v4_venc.fnStopReceiving(index);
 
@@ -1208,9 +1372,13 @@ int v4_system_init(char *snrConfig)
            alone). Equal sizes share one pool, a reservation as large as
            the capture adds its blocks to the full-size YUV pool. */
         for (int i = 0; i < _v4_vb_extra_num; i++) {
+            /* A scaled H.26x channel of another aspect runs at the
+               capture-aspect box around its size (see v4_video_crop) */
+            unsigned int width, height;
+            v4_video_capturebox(_v4_vb_extra[i].width, _v4_vb_extra[i].height,
+                &width, &height);
             unsigned long long size = v4_buffer_calculate_venc(
-                _v4_vb_extra[i].width, _v4_vb_extra[i].height,
-                V4_PIXFMT_YVU420SP, 8);
+                width, height, V4_PIXFMT_YVU420SP, 8);
             unsigned int p;
             if (size >= pool.comm[1].blockSize) p = 1;
             else for (p = 2; p < pool.count; p++)
