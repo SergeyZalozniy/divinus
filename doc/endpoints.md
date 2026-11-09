@@ -147,6 +147,7 @@ Configures the H.26x MP4 stream.
 | GET    | `width`    | Video width (px)                           |
 | GET    | `height`   | Video height (px)                          |
 | GET    | `fps`      | Frames per second                          |
+| GET    | `gop`      | Group of pictures length in frames         |
 | GET    | `bitrate`  | Bits per second                            |
 | GET    | `h265`     | Use H.265 instead of H.264                 |
 | GET    | `mode`     | Compression mode (CBR, VBR, QP, ABR, AVBR) |

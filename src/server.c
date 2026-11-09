@@ -1304,6 +1304,10 @@ void respond_request(http_request_t *req) {
                     short result = strtol(value, &remain, 10);
                     if (remain != value)
                         app_config.mp4_fps = result;
+                } else if (EQUALS(key, "gop")) {
+                    long result;
+                    if (parse_ranged(value, 1, 65535, &result))
+                        app_config.mp4_gop = result;
                 } else if (EQUALS(key, "bitrate")) {
                     short result = strtol(value, &remain, 10);
                     if (remain != value)
