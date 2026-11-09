@@ -867,6 +867,11 @@ int media_mp4_enable(void) {
             index, ret, errstr(ret));
     }
 
+    /* A channel (re)created at night (e.g. by /api/mp4) starts in colour,
+       grayscale is only pushed to the channels alive when night begins */
+    if (night_grayscale_on())
+        set_grayscale(true);
+
     return EXIT_SUCCESS;
 }
 
