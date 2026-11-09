@@ -608,18 +608,23 @@ grant_access:
    written for it (e.g. BlueOS Video Streams) detect and drive the camera
    unchanged. Only served with system.web_majestic_compat, behind the same
    auth gate as everything else. All state is RAM only, like /api/night. */
-static void send_majestic(int fd, const char *type, const char *body) {
+static void send_majestic_status(int fd, const char *status,
+    const char *type, const char *body) {
     char response[1024];
     int respLen = snprintf(response, sizeof(response),
-        "HTTP/1.1 200 OK\r\n"
+        "HTTP/1.1 %s\r\n"
         "Content-Type: %s\r\n"
         "Content-Length: %u\r\n"
         "Connection: close\r\n"
         "\r\n"
         "%s",
-        type, (unsigned int)strlen(body), body);
+        status, type, (unsigned int)strlen(body), body);
     if (respLen >= (int)sizeof(response)) respLen = sizeof(response) - 1;
     send_and_close(fd, response, respLen);
+}
+
+static void send_majestic(int fd, const char *type, const char *body) {
+    send_majestic_status(fd, "200 OK", type, body);
 }
 
 /* The sensor (or ADC) only decides when the night thread runs at all */
@@ -627,9 +632,11 @@ static bool majestic_light_monitor(void) {
     return app_config.night_mode_enable && !night_manual_on();
 }
 
+/* Judged by grayscale and the IR-cut filter only, as the IR LEDs may stay
+   off at night (night_mode.ir_led_follow) */
 static bool majestic_in_state(bool night) {
     return night ? night_mode_on() :
-        !night_grayscale_on() && night_ircut_on() && !night_irled_on();
+        !night_grayscale_on() && night_ircut_on();
 }
 
 /* Forces day or night until the light monitor is turned back on. The
@@ -677,14 +684,15 @@ static bool respond_majestic(http_request_t *req) {
             "# TYPE grayscale_enabled gauge\n"
             "grayscale_enabled %d\n",
             night_mode_on() ? 1 : 0, majestic_light_monitor() ? 1 : 0,
-            night_ircut_on() ? 1 : 0, night_irled_on() ? 1 : 0,
+            night_ircut_on() ? 1 : 0,
+            app_config.ir_led_pin != 999 && night_irled_on() ? 1 : 0,
             night_grayscale_on() ? 1 : 0);
         send_majestic(req->clntFd, "text/plain; version=0.0.4", body);
         return true;
     }
 
     if (EQUALS(uri, "/api/v1/config.json")) {
-        char body[640], cut1[8], cut2[8], led[8], sense[8];
+        char body[768], cut1[8], cut2[8], led[8], sense[8];
         majestic_pin(cut1, sizeof(cut1), app_config.ir_cut_pin1);
         majestic_pin(cut2, sizeof(cut2), app_config.ir_cut_pin2);
         majestic_pin(led, sizeof(led), app_config.ir_led_pin);
@@ -692,13 +700,17 @@ static bool respond_majestic(http_request_t *req) {
         snprintf(body, sizeof(body),
             "{\"nightMode\":{\"enabled\":%s,\"lightMonitor\":%s,\"colorToGray\":true,"
             "\"irCutPin1\":%s,\"irCutPin2\":%s,\"backlightPin\":%s,"
+            "\"backlight\":\"%s\",\"light\":%s,"
             "\"lightSensorPin\":%s,\"lightSensorInvert\":%s,"
             "\"autoNightDelay\":%u,\"autoDayDelay\":%u,"
             "\"pinSwitchDelayUs\":%u,\"night\":%s,\"manual\":%s},"
             "\"system\":{\"webPort\":%u,\"streamer\":\"divinus\"}}",
             app_config.night_mode_enable ? "true" : "false",
             majestic_light_monitor() ? "true" : "false",
-            cut1, cut2, led, sense,
+            cut1, cut2, led,
+            app_config.ir_led_follow ? "auto" : "off",
+            app_config.ir_led_pin != 999 && night_irled_on() ? "true" : "false",
+            sense,
             app_config.ir_sensor_invert ? "true" : "false",
             app_config.night_delay_s, app_config.day_delay_s,
             app_config.pin_switch_delay_us,
@@ -709,8 +721,9 @@ static bool respond_majestic(http_request_t *req) {
     }
 
     if (EQUALS(uri, "/api/v1/set")) {
-        /* Only nightMode.lightMonitor is understood; any other majestic key
-           is accepted and ignored, so a stray one does not fail a client */
+        /* Only nightMode.lightMonitor and nightMode.backlight are understood;
+           any other majestic key is accepted and ignored, so a stray one does
+           not fail a client. A backlight value we cannot follow is refused. */
         const char *answer = "OK";
         while (req->query) {
             char *value = split(&req->query, "&");
@@ -718,6 +731,19 @@ static bool respond_majestic(http_request_t *req) {
             unescape_uri(value);
             char *key = split(&value, "=");
             if (!key || !*key || !value || !*value) continue;
+            if (EQUALS(key, "nightMode.backlight")) {
+                if (EQUALS_CASE(value, "auto"))
+                    night_irled_follow(1);
+                else if (EQUALS_CASE(value, "off"))
+                    night_irled_follow(0);
+                else {
+                    send_majestic_status(req->clntFd, "400 Bad Request", "text/plain",
+                        "nightMode.backlight must be auto or off");
+                    return true;
+                }
+                answer = app_config.ir_led_follow ? "auto" : "off";
+                continue;
+            }
             if (!EQUALS(key, "nightMode.lightMonitor")) continue;
             if (EQUALS_CASE(value, "true") || EQUALS(value, "1")) {
                 /* Back to the sensor: restart the thread like /api/night
@@ -1621,6 +1647,11 @@ void respond_request(http_request_t *req) {
                         night_irled(1);
                     else if (EQUALS_CASE(value, "false") || EQUALS(value, "0"))
                         night_irled(0);
+                } else if (EQUALS(key, "irled_follow")) {
+                    if (EQUALS_CASE(value, "true") || EQUALS(value, "1"))
+                        night_irled_follow(1);
+                    else if (EQUALS_CASE(value, "false") || EQUALS(value, "0"))
+                        night_irled_follow(0);
                 } else if (EQUALS(key, "irled_pin")) {
                     short result = strtol(value, &remain, 10);
                     if (remain != value)
@@ -1674,13 +1705,15 @@ void respond_request(http_request_t *req) {
             "Connection: close\r\n"
             "\r\n"
             "{\"active\":%s,\"manual\":%s,\"grayscale\":%s,\"ircut\":%s,\"ircut_pin1\":%d,\"ircut_pin2\":%d,"
-            "\"irled\":%s,\"irled_pin\":%d,\"irsense_pin\":%d,\"irsense_invert\":%s,"
+            "\"irled\":%s,\"irled_follow\":%s,\"irled_pin\":%d,\"irsense_pin\":%d,\"irsense_invert\":%s,"
             "\"night_delay_s\":%d,\"day_delay_s\":%d,\"day_min_lum\":%u,\"day_max_gain\":%u,%s,"
             "\"adc_device\":\"%s\",\"adc_threshold\":%d}",
             app_config.night_mode_enable ? "true" : "false", night_manual_on() ? "true" : "false",
             night_grayscale_on() ? "true" : "false",
             night_ircut_on() ? "true" : "false", app_config.ir_cut_pin1, app_config.ir_cut_pin2,
-            night_irled_on() ? "true" : "false", app_config.ir_led_pin, app_config.ir_sensor_pin,
+            app_config.ir_led_pin != 999 && night_irled_on() ? "true" : "false",
+            app_config.ir_led_follow ? "true" : "false",
+            app_config.ir_led_pin, app_config.ir_sensor_pin,
             app_config.ir_sensor_invert ? "true" : "false",
             app_config.night_delay_s, app_config.day_delay_s,
             app_config.day_min_lum, app_config.day_max_gain, exposure,

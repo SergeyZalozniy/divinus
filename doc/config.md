@@ -12,7 +12,7 @@ This document describes the fields that can be found within a configuration file
 - **web_auth_pass**: Password for basic authentication (default: `12345`).
 - **web_auth_skiplocal**: Boolean to skip authentication for local addresses (default: `true`).
 - **web_enable_static**: Boolean to enable serving static web content (default: `false`).
-- **web_majestic_compat**: Boolean to also serve the day/night subset of majestic's HTTP API (`/api/v1/config.json`, `/metrics/night`, `/night/on|off|toggle`, `/api/v1/set?nightMode.lightMonitor=`), for tools such as BlueOS Video Streams that only know OpenIPC's stock streamer; see the endpoints reference (default: `false`).
+- **web_majestic_compat**: Boolean to also serve the day/night subset of majestic's HTTP API (`/api/v1/config.json`, `/metrics/night`, `/night/on|off|toggle`, `/api/v1/set?nightMode.lightMonitor=` and `nightMode.backlight=`), for tools such as BlueOS Video Streams that only know OpenIPC's stock streamer; see the endpoints reference (default: `false`).
 - **isp_thread_stack_size**: Stack size for ISP thread, if applicable (default: `16384`).
 - **venc_stream_thread_stack_size**: Stack size for video encoding stream thread (default: `16384`).
 - **web_server_thread_stack_size**: Stack size for web server thread (default: `65536`).
@@ -25,6 +25,7 @@ This document describes the fields that can be found within a configuration file
 - **ir_cut_pin1**: GPIO number for IR cut filter control (normal state pin).
 - **ir_cut_pin2**: GPIO number for IR cut filter control (inverted state pin).
 - **ir_led_pin**: GPIO number for IR LED control.
+- **ir_led_follow**: Boolean, when `true` the IR LEDs on `ir_led_pin` follow day/night (on at night, off by day); when `false` night mode keeps them off, also at night (default: `true`). Night is judged by grayscale and the IR-cut filter only, so dark LEDs do not count as day. Also `/api/night?irled_follow=` and, in majestic compatibility, `nightMode.backlight=auto|off`.
 - **ir_sensor_pin**: GPIO number for PIR motion sensor or similar digital toggle; `999` means no sensor (default).
 - **ir_sensor_invert**: Boolean to invert the sensor input, when `true` a low level on `ir_sensor_pin` (or an ADC reading below the threshold) means night (default: `false`).
 - **check_interval_s**: Interval in seconds to check night mode conditions.

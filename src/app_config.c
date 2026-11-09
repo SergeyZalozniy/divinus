@@ -101,6 +101,7 @@ int app_config_save(void) {
     fprintf(file, "  ir_cut_pin1: %d\n", app_config.ir_cut_pin1);
     fprintf(file, "  ir_cut_pin2: %d\n", app_config.ir_cut_pin2);
     fprintf(file, "  ir_led_pin: %d\n", app_config.ir_led_pin);
+    fprintf(file, "  ir_led_follow: %s\n", app_config.ir_led_follow ? "true" : "false");
     fprintf(file, "  pin_switch_delay_us: %d\n", app_config.pin_switch_delay_us);
     fprintf(file, "  adc_device: %s\n", app_config.adc_device);
     {
@@ -348,6 +349,7 @@ enum ConfigError app_config_parse(void) {
     app_config.ir_cut_pin1 = 999;
     app_config.ir_cut_pin2 = 999;
     app_config.ir_led_pin = 999;
+    app_config.ir_led_follow = true;
     app_config.pin_switch_delay_us = 250;
     app_config.check_interval_s = 10;
     app_config.ir_sensor_invert = false;
@@ -456,6 +458,8 @@ enum ConfigError app_config_parse(void) {
         parse_int(
             &ini, "night_mode", "ir_led_pin", 0, PIN_MAX,
             &app_config.ir_led_pin);
+        parse_bool(&ini, "night_mode", "ir_led_follow",
+            &app_config.ir_led_follow);
         parse_int(
             &ini, "night_mode", "pin_switch_delay_us", 0, 1000,
             &app_config.pin_switch_delay_us);

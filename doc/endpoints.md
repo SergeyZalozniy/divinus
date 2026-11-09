@@ -218,7 +218,8 @@ Configures the night mode parameters.
 | GET    | `ircut`        | Control IR-Cut filter     |
 | GET    | `ircut_pin1`   | GPIO pin 1 for IR-Cut     |
 | GET    | `ircut_pin2`   | GPIO pin 2 for IR-Cut     |
-| GET    | `irled`        | Control IR LEDs           |
+| GET    | `irled`        | Control IR LEDs (reads `false` without an `irled_pin`) |
+| GET    | `irled_follow` | IR LEDs follow day/night (`false` = always off) |
 | GET    | `irled_pin`    | GPIO pin for IR LEDs      |
 | GET    | `irsense_pin`  | GPIO pin for IR sensor    |
 | GET    | `irsense_invert` | Low sensor level = night |
@@ -239,6 +240,7 @@ Configures the night mode parameters.
   "ircut_pin1": 17,
   "ircut_pin2": 18,
   "irled": true,
+  "irled_follow": true,
   "irled_pin": 20,
   "irsense_pin": 21,
   "irsense_invert": false,
@@ -262,14 +264,17 @@ With `system.web_majestic_compat: true` (off by default) the server also answers
 | `GET /api/v1/config.json` | JSON, see below | None |
 | `GET /metrics/night` | Prometheus text, see below | None |
 | `GET /night` | `1` (night) or `0` (day) | None |
-| `GET /night/on` | `1` | Manual mode, then night: grayscale on, IR-cut filter out, IR LEDs on |
+| `GET /night/on` | `1` | Manual mode, then night: grayscale on, IR-cut filter out, IR LEDs on (if `backlight` is `auto`) |
 | `GET /night/off` | `0` | Manual mode, then day: grayscale off, IR-cut filter in, IR LEDs off |
 | `GET /night/toggle` | `1` or `0`, the new state | Manual mode, then the opposite of the current state |
 | `GET /api/v1/set?nightMode.lightMonitor=true` | `true` (or `false` when night mode is disabled in the config) | Automatic mode: the night thread restarts and the light sensor decides, like `/api/night?manual=false` |
 | `GET /api/v1/set?nightMode.lightMonitor=false` | `false` | Manual mode, keeping the current picture |
+| `GET /api/v1/set?nightMode.backlight=auto` | `auto` | IR LEDs follow day/night (on at night, off by day), like `/api/night?irled_follow=true`; turns them on at once if it is night |
+| `GET /api/v1/set?nightMode.backlight=off` | `off` | IR LEDs stay off, also at night; turns them off at once |
+| `GET /api/v1/set?nightMode.backlight=<other>` | 400 `nightMode.backlight must be auto or off` | None (majestic's `manual` is not supported); keys before it in the same query are applied |
 | `GET /api/v1/set?<any other key>=...` | `OK` | Ignored |
 
-Bodies are `text/plain` without a trailing newline, except `config.json`. `/night/on` and `/night/off` only pulse the IR-cut coil when the state actually changes. `lightMonitor` is reported as `true` only while night mode is enabled and not in manual mode.
+Bodies are `text/plain` without a trailing newline, except `config.json`. `/night/on` and `/night/off` only pulse the IR-cut coil when the state actually changes. `lightMonitor` is reported as `true` only while night mode is enabled and not in manual mode. `backlight` mirrors `night_mode.ir_led_follow` (`auto` = follow, `off` = never); it is accepted even without an `ir_led_pin` (nothing to drive then). `light` is the current IR LED output, `false` without an `ir_led_pin`.
 
 `/api/v1/config.json` (pins at `999`, i.e. unused, read `null`):
 ```json
@@ -281,6 +286,8 @@ Bodies are `text/plain` without a trailing newline, except `config.json`. `/nigh
     "irCutPin1": 11,
     "irCutPin2": 10,
     "backlightPin": null,
+    "backlight": "auto",
+    "light": false,
     "lightSensorPin": 65,
     "lightSensorInvert": true,
     "autoNightDelay": 20,
@@ -301,7 +308,7 @@ ircut_enabled 1
 light_enabled 0
 grayscale_enabled 0
 ```
-`night_enabled` is the current state (night when grayscale, filter out and IR LEDs on), `night_mode_source` is `0` in manual mode and `1` while the light sensor decides.
+`night_enabled` is the current state (night when grayscale and filter out, whatever the IR LEDs do), `light_enabled` is the IR LED output (`0` without an `ir_led_pin`), `night_mode_source` is `0` in manual mode and `1` while the light sensor decides.
 
 ### On-Screen Display (OSD)
 

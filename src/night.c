@@ -12,7 +12,8 @@ bool night_irled_on(void) { return irled; }
 
 bool night_manual_on(void) { return manual; }
 
-bool night_mode_on(void) { return grayscale && !ircut && irled; }
+/* The IR LEDs do not count: with ir_led_follow off they stay dark at night */
+bool night_mode_on(void) { return grayscale && !ircut; }
 
 void night_grayscale(bool enable) {
     set_grayscale(enable);
@@ -37,6 +38,19 @@ void night_irled(bool enable) {
     if (app_config.ir_led_pin != 999)
         gpio_write(app_config.ir_led_pin, enable);
     irled = enable;
+}
+
+/* Whether night mode drives the IR LEDs (on at night, off by day) or keeps
+   them off for good. Applied at once when it is night, without touching the
+   IR-cut filter; by day the LEDs are off either way. */
+void night_irled_follow(bool follow) {
+    app_config.ir_led_follow = follow;
+    if (!night_mode_on()) return;
+#if defined(__arm__) && !defined(__ARM_PCS_VFP) && __ARM_ARCH == 6
+    if (plat == HAL_PLATFORM_F1)
+        follow = follow && (app_config.night_lamp & HAL_LIGHT_IR);
+#endif
+    night_irled(follow);
 }
 
 static void night_lamp(bool enable) {
@@ -132,12 +146,12 @@ void night_mode(bool enable) {
         } else if (lamp & HAL_LIGHT_WHITE) {
             night_grayscale(false);
             night_ircut(true);
-            night_irled((lamp & HAL_LIGHT_IR) != 0);
+            night_irled(app_config.ir_led_follow && (lamp & HAL_LIGHT_IR));
             night_lamp(true);
         } else {
             night_grayscale(true);
             night_ircut(false);
-            night_irled((lamp & HAL_LIGHT_IR) != 0);
+            night_irled(app_config.ir_led_follow && (lamp & HAL_LIGHT_IR));
             night_lamp(true);
         }
         return;
@@ -145,7 +159,7 @@ void night_mode(bool enable) {
 #endif
     night_grayscale(enable);
     night_ircut(!enable);
-    night_irled(enable);
+    night_irled(enable && app_config.ir_led_follow);
 }
 
 void *night_thread(void) {

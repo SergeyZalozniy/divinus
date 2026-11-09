@@ -32,6 +32,7 @@ struct AppConfig {
     unsigned int ir_cut_pin1;
     unsigned int ir_cut_pin2;
     unsigned int ir_led_pin;
+    bool ir_led_follow;
     unsigned int ir_sensor_pin;
     bool ir_sensor_invert;
     unsigned int check_interval_s;

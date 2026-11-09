@@ -58,6 +58,7 @@ night_mode:
   ir_cut_pin1: 1
   ir_cut_pin2: 2
   ir_led_pin: 3
+  ir_led_follow: true
   pin_switch_delay_us: 150
   adc_device: /dev/sar_adc_drv
   lamp: ir

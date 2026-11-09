@@ -22,6 +22,7 @@ bool night_mode_on(void);
 void night_grayscale(bool enable);
 void night_ircut(bool enable);
 void night_irled(bool enable);
+void night_irled_follow(bool follow);
 void night_manual(bool enable);
 void night_mode(bool enable);
 
