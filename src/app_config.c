@@ -180,6 +180,12 @@ int app_config_save(void) {
         fprintf(file, "  ip_qp_delta: auto\n");
     else
         fprintf(file, "  ip_qp_delta: %d\n", app_config.mp4_ipQpDelta);
+    fprintf(file, "  roi_enable: %s\n", app_config.mp4_roiEnable ? "true" : "false");
+    fprintf(file, "  roi_x: %d\n", app_config.mp4_roiX);
+    fprintf(file, "  roi_y: %d\n", app_config.mp4_roiY);
+    fprintf(file, "  roi_w: %d\n", app_config.mp4_roiW);
+    fprintf(file, "  roi_h: %d\n", app_config.mp4_roiH);
+    fprintf(file, "  roi_qp_delta: %d\n", app_config.mp4_roiQpDelta);
 
     fprintf(file, "sub:\n");
     fprintf(file, "  enable: %s\n", app_config.sub_enable ? "true" : "false");
@@ -199,6 +205,12 @@ int app_config_save(void) {
         fprintf(file, "  ip_qp_delta: auto\n");
     else
         fprintf(file, "  ip_qp_delta: %d\n", app_config.sub_ipQpDelta);
+    fprintf(file, "  roi_enable: %s\n", app_config.sub_roiEnable ? "true" : "false");
+    fprintf(file, "  roi_x: %d\n", app_config.sub_roiX);
+    fprintf(file, "  roi_y: %d\n", app_config.sub_roiY);
+    fprintf(file, "  roi_w: %d\n", app_config.sub_roiW);
+    fprintf(file, "  roi_h: %d\n", app_config.sub_roiH);
+    fprintf(file, "  roi_qp_delta: %d\n", app_config.sub_roiQpDelta);
 
     fprintf(file, "osd:\n");
     fprintf(file, "  enable: %s\n", app_config.osd_enable ? "true" : "false");
@@ -265,6 +277,18 @@ static void parse_ipqpdelta(struct IniConfig *ini, const char *section, int *val
         *value = val;
 }
 
+/* Encoder ROI: rectangle in percent of the encoded picture, relative QP */
+static void parse_roi(struct IniConfig *ini, const char *section, bool *enable,
+    unsigned int *x, unsigned int *y, unsigned int *w, unsigned int *h, int *qpDelta) {
+    int val;
+    parse_bool(ini, section, "roi_enable", enable);
+    if (parse_int(ini, section, "roi_x", 0, 99, &val) == CONFIG_OK) *x = val;
+    if (parse_int(ini, section, "roi_y", 0, 99, &val) == CONFIG_OK) *y = val;
+    if (parse_int(ini, section, "roi_w", 1, 100, &val) == CONFIG_OK) *w = val;
+    if (parse_int(ini, section, "roi_h", 1, 100, &val) == CONFIG_OK) *h = val;
+    if (parse_int(ini, section, "roi_qp_delta", -10, 10, &val) == CONFIG_OK) *qpDelta = val;
+}
+
 enum ConfigError app_config_parse(void) {
     memset(&app_config, 0, sizeof(struct AppConfig));
 
@@ -317,6 +341,12 @@ enum ConfigError app_config_parse(void) {
     app_config.mp4_intraRefreshNum = 1;
     app_config.mp4_intraRefreshQp = 0;
     app_config.mp4_ipQpDelta = HAL_IPQPDELTA_AUTO;
+    app_config.mp4_roiEnable = false;
+    app_config.mp4_roiX = 25;
+    app_config.mp4_roiY = 25;
+    app_config.mp4_roiW = 50;
+    app_config.mp4_roiH = 50;
+    app_config.mp4_roiQpDelta = -4;
 
     app_config.sub_enable = false;
     app_config.sub_codecH265 = false;
@@ -332,6 +362,12 @@ enum ConfigError app_config_parse(void) {
     app_config.sub_intraRefreshNum = 1;
     app_config.sub_intraRefreshQp = 0;
     app_config.sub_ipQpDelta = HAL_IPQPDELTA_AUTO;
+    app_config.sub_roiEnable = false;
+    app_config.sub_roiX = 25;
+    app_config.sub_roiY = 25;
+    app_config.sub_roiW = 50;
+    app_config.sub_roiH = 50;
+    app_config.sub_roiQpDelta = -4;
 
     app_config.mjpeg_enable = false;
     app_config.mjpeg_fps = 15;
@@ -662,6 +698,9 @@ enum ConfigError app_config_parse(void) {
         parse_int(&ini, "mp4", "intra_refresh_qp", 0, 51,
             &app_config.mp4_intraRefreshQp);
         parse_ipqpdelta(&ini, "mp4", &app_config.mp4_ipQpDelta);
+        parse_roi(&ini, "mp4", &app_config.mp4_roiEnable, &app_config.mp4_roiX,
+            &app_config.mp4_roiY, &app_config.mp4_roiW, &app_config.mp4_roiH,
+            &app_config.mp4_roiQpDelta);
     }
 
     parse_bool(&ini, "sub", "enable", &app_config.sub_enable);
@@ -727,6 +766,9 @@ enum ConfigError app_config_parse(void) {
         parse_int(&ini, "sub", "intra_refresh_qp", 0, 51,
             (int *)&app_config.sub_intraRefreshQp);
         parse_ipqpdelta(&ini, "sub", &app_config.sub_ipQpDelta);
+        parse_roi(&ini, "sub", &app_config.sub_roiEnable, &app_config.sub_roiX,
+            &app_config.sub_roiY, &app_config.sub_roiW, &app_config.sub_roiH,
+            &app_config.sub_roiQpDelta);
     }
 
     err = parse_bool(&ini, "jpeg", "enable", &app_config.jpeg_enable);

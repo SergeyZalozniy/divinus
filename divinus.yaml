@@ -90,6 +90,13 @@ mp4:
   gop: 40
   bitrate: 1024
   profile: 2
+  # Encoder ROI (HiSilicon/Goke v4): % of the encoded picture, relative QP
+  # roi_enable: false
+  # roi_x: 25
+  # roi_y: 25
+  # roi_w: 50
+  # roi_h: 50
+  # roi_qp_delta: -4
 
 sub:
   enable: false
@@ -101,6 +108,13 @@ sub:
   gop: 40
   bitrate: 512
   profile: 1
+  # Encoder ROI (HiSilicon/Goke v4): % of the encoded picture, relative QP
+  # roi_enable: false
+  # roi_x: 25
+  # roi_y: 25
+  # roi_w: 50
+  # roi_h: 50
+  # roi_qp_delta: -4
 
 jpeg:
   enable: false

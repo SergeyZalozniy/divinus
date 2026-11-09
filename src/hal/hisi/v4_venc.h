@@ -234,6 +234,16 @@ typedef struct {
     unsigned int reqIQp;
 } v4_venc_iref;
 
+/* VENC_ROI_ATTR_S of MPP V4 (Hi3516EV300 / GK7205V300): index 0..7,
+   absQp 0 = qp is a delta to the rate control's QP */
+typedef struct {
+    unsigned int index;
+    int enable;
+    int absQp;
+    int qp;
+    v4_common_rect rect;
+} v4_venc_roi;
+
 // VENC_PARAM_MOD_S (hi_comm_venc.h / comm_venc.h of hi3516ev300 and gk7205v300)
 typedef enum {
     V4_VENC_MODTYPE_VENC = 1,
@@ -437,6 +447,8 @@ typedef struct {
     int (*fnSetColorToGray)(int channel, int *active);
     int (*fnGetIntraRefresh)(int channel, v4_venc_iref *config);
     int (*fnSetIntraRefresh)(int channel, v4_venc_iref *config);
+    int (*fnGetRoiAttr)(int channel, unsigned int index, v4_venc_roi *config);
+    int (*fnSetRoiAttr)(int channel, v4_venc_roi *config);
     int (*fnGetModParam)(v4_venc_mod *param);
     int (*fnSetModParam)(v4_venc_mod *param);
 
@@ -536,6 +548,13 @@ static int v4_venc_load(v4_venc_impl *venc_lib) {
     if (!(venc_lib->fnSetIntraRefresh = (int(*)(int channel, v4_venc_iref *config))
         dlsym(venc_lib->handle, "HI_MPI_VENC_SetIntraRefresh")))
         HAL_INFO("v4_venc", "Intra refresh is not supported by this library!\n");
+
+    // Optional, a missing ROI call only disables the feature
+    venc_lib->fnGetRoiAttr = (int(*)(int channel, unsigned int index, v4_venc_roi *config))
+        dlsym(venc_lib->handle, "HI_MPI_VENC_GetRoiAttr");
+    if (!(venc_lib->fnSetRoiAttr = (int(*)(int channel, v4_venc_roi *config))
+        dlsym(venc_lib->handle, "HI_MPI_VENC_SetRoiAttr")))
+        HAL_INFO("v4_venc", "Encoder ROI is not supported by this library!\n");
 
     // Optional, without them the module parameters stay as loaded
     venc_lib->fnGetModParam = (int(*)(v4_venc_mod *param))

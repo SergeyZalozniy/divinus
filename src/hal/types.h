@@ -87,6 +87,9 @@ typedef struct {
     char irefActive, cropOn;
     unsigned int irefNum;
     unsigned short cropX, cropY, cropW, cropH;
+    // Encoder ROI as applied, in encoded-picture pixels (v4)
+    char roiOn;
+    unsigned short roiX, roiY, roiW, roiH;
 } hal_chnstate;
 
 typedef struct {
@@ -121,6 +124,11 @@ typedef struct {
     unsigned int intraRefreshNum, intraRefreshQp;
     // I/P QP delta, HAL_IPQPDELTA_AUTO lets the HAL pick it
     int ipQpDelta;
+    // One encoder ROI: rectangle in percent of the encoded picture with a
+    // relative QP delta (negative = more bits inside)
+    char roiEnable;
+    unsigned char roiX, roiY, roiW, roiH;
+    signed char roiQpDelta;
 } hal_vidconfig;
 
 typedef struct {

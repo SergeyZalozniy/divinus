@@ -157,6 +157,10 @@ Configures the H.26x MP4 stream.
 | GET    | `intra_refresh_num` | Rows or columns refreshed per frame |
 | GET    | `intra_refresh_qp` | QP of requested I-frames (0-51)    |
 | GET    | `ip_qp_delta` | I/P QP delta (-10 to 30, auto)          |
+| GET    | `roi_enable` | Enable/disable the encoder ROI           |
+| GET    | `roi_x`, `roi_y` | ROI origin, % of the encoded picture (0-99) |
+| GET    | `roi_w`, `roi_h` | ROI size, % of the encoded picture (1-100) |
+| GET    | `roi_qp_delta` | QP delta inside the ROI (-10 to 10)    |
 
 **Response**
 ```json
@@ -177,7 +181,9 @@ Configures the H.26x MP4 stream.
   "ip_qp_delta": "auto",
   "intra_refresh_active": false,
   "intra_refresh_num_effective": 0,
-  "crop": null
+  "crop": null,
+  "roi": {"enable": false, "x": 25, "y": 25, "w": 50, "h": 50, "qp_delta": -4},
+  "roi_px": null
 }
 ```
 
@@ -200,6 +206,15 @@ JPEG/MJPEG are not cropped). A 16:9 stream from a 4:3 sensor loses the top and b
 1296x972 capture, or `null` for a plain scale (e.g. 1280x960, 960x720, 640x480). The main stream is cropped by the
 encoder (VENC channel crop); the sub stream's VPSS channel scales to the capture-aspect box around its size
 (640x480 for 640x360) and crops that, so each stream has its own aspect.
+
+**Encoder ROI.** One region of interest per H.264/H.265 stream (HiSilicon/Goke v4 only, `HI_MPI_VENC_SetRoiAttr`
+index 0, relative QP): inside the rectangle the encoder uses the rate control's QP plus `roi_qp_delta`, so a
+negative delta gives the region more of the same bitrate and the rest of the picture less. The rectangle is given
+in percent of the encoded picture (after the crop above), so it survives size changes; it is snapped outwards to
+the 16-pixel grid and clamped to the picture. `roi` echoes the configuration, `roi_px` reports the rectangle the
+SDK accepted on the live channel in encoded pixels (`{"x":320,"y":176,"w":640,"h":368}` for the default centred
+50 % x 50 % at 1280x720), or `null` when the ROI is off, refused (the log says why) or unsupported. A disabled ROI
+is written as disabled on every channel (re)creation.
 
 #### `/api/sub`
 

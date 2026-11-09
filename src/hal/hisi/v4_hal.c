@@ -811,6 +811,81 @@ static int v4_video_ipqpdelta(hal_vidconfig *config)
     return MAX(-10, MIN(delta, 30));
 }
 
+/* One ROI (index 0) per H.26x channel, after CreateChn and before
+ * StartRecvFrame. The rect comes in percent of the encoded picture and is
+ * snapped outwards to the 16-pixel grid (32, then 64 if the SDK refuses
+ * it), clamped to the picture. A disabled ROI is written as disabled so a
+ * recreated channel never keeps a stale region. Optional: a failure only
+ * logs a warning and the channel streams without it. */
+static void v4_video_roi(char index, hal_vidconfig *config)
+{
+    int ret = EXIT_FAILURE;
+    static const unsigned int aligns[] = { 16, 32, 64 };
+    unsigned int width = config->width, height = config->height;
+    v4_venc_roi roi;
+
+    v4_state[index].roiOn = 0;
+    if (config->codec != HAL_VIDCODEC_H264 && config->codec != HAL_VIDCODEC_H265)
+        return;
+    if (!v4_venc.fnSetRoiAttr) {
+        if (config->roiEnable)
+            HAL_INFO("v4_venc", "Encoder ROI is unavailable on this library, "
+                "channel %d runs without it\n", index);
+        return;
+    }
+
+    if (!config->roiEnable) {
+        memset(&roi, 0, sizeof(roi));
+        if (!v4_venc.fnGetRoiAttr || v4_venc.fnGetRoiAttr(index, 0, &roi) ||
+            !roi.rect.width || !roi.rect.height) {
+            roi.rect = (v4_common_rect){ .x = 0, .y = 0,
+                .width = ALIGN_BACK(width, 16), .height = ALIGN_BACK(height, 16) };
+            roi.qp = 0;
+            roi.absQp = 0;
+        }
+        roi.index = 0;
+        roi.enable = 0;
+        if (ret = v4_venc.fnSetRoiAttr(index, &roi))
+            HAL_WARNING("v4_venc", "Disabling the ROI of channel %d failed "
+                "with %#x!\n", index, ret);
+        return;
+    }
+
+    for (int i = 0; i < 3; i++) {
+        unsigned int a = aligns[i];
+        unsigned int x0 = ALIGN_BACK(width * config->roiX / 100, a),
+            y0 = ALIGN_BACK(height * config->roiY / 100, a),
+            x1 = ALIGN_UP(width * MIN(config->roiX + config->roiW, 100) / 100, a),
+            y1 = ALIGN_UP(height * MIN(config->roiY + config->roiH, 100) / 100, a);
+        if (x1 > width) x1 = width;
+        if (y1 > height) y1 = height;
+        if (x0 >= x1) x0 = x1 > a ? ALIGN_BACK(x1 - a, a) : 0;
+        if (y0 >= y1) y0 = y1 > a ? ALIGN_BACK(y1 - a, a) : 0;
+
+        memset(&roi, 0, sizeof(roi));
+        roi.index = 0;
+        roi.enable = 1;
+        roi.absQp = 0;
+        roi.qp = config->roiQpDelta;
+        roi.rect = (v4_common_rect){ .x = x0, .y = y0,
+            .width = x1 - x0, .height = y1 - y0 };
+        if (!(ret = v4_venc.fnSetRoiAttr(index, &roi))) {
+            HAL_INFO("v4_venc", "ROI on channel %d: %ux%u at %d,%d of %ux%u, "
+                "QP %+d (relative, %u-aligned)\n", index, roi.rect.width,
+                roi.rect.height, roi.rect.x, roi.rect.y, width, height, roi.qp, a);
+            v4_state[index].roiOn = 1;
+            v4_state[index].roiX = roi.rect.x;
+            v4_state[index].roiY = roi.rect.y;
+            v4_state[index].roiW = roi.rect.width;
+            v4_state[index].roiH = roi.rect.height;
+            return;
+        }
+        HAL_WARNING("v4_venc", "ROI %ux%u at %d,%d on channel %d (%u-aligned) "
+            "failed with %#x!\n", roi.rect.width, roi.rect.height, roi.rect.x,
+            roi.rect.y, index, a, ret);
+    }
+}
+
 int v4_video_create(char index, hal_vidconfig *config)
 {
     int ret;
@@ -956,6 +1031,8 @@ int v4_video_create(char index, hal_vidconfig *config)
         }
     }
 
+    v4_video_roi(index, config);
+
     {
         int count = -1;
         if (config->codec != HAL_VIDCODEC_JPG &&
@@ -984,6 +1061,7 @@ int v4_video_destroy(char index)
     v4_state[index].irefActive = 0;
     v4_state[index].irefNum = 0;
     v4_state[index].cropOn = 0;
+    v4_state[index].roiOn = 0;
 
     v4_venc.fnStopReceiving(index);
 

@@ -819,6 +819,12 @@ int media_mp4_enable(void) {
         config.intraRefreshNum = app_config.mp4_intraRefreshNum;
         config.intraRefreshQp = app_config.mp4_intraRefreshQp;
         config.ipQpDelta = app_config.mp4_ipQpDelta;
+        config.roiEnable = app_config.mp4_roiEnable;
+        config.roiX = app_config.mp4_roiX;
+        config.roiY = app_config.mp4_roiY;
+        config.roiW = app_config.mp4_roiW;
+        config.roiH = app_config.mp4_roiH;
+        config.roiQpDelta = app_config.mp4_roiQpDelta;
 
         switch (plat) {
 #if defined(__ARM_PCS_VFP)
@@ -939,6 +945,12 @@ int media_sub_enable(void) {
         config.intraRefreshNum = app_config.sub_intraRefreshNum;
         config.intraRefreshQp = app_config.sub_intraRefreshQp;
         config.ipQpDelta = app_config.sub_ipQpDelta;
+        config.roiEnable = app_config.sub_roiEnable;
+        config.roiX = app_config.sub_roiX;
+        config.roiY = app_config.sub_roiY;
+        config.roiW = app_config.sub_roiW;
+        config.roiH = app_config.sub_roiH;
+        config.roiQpDelta = app_config.sub_roiQpDelta;
 
         ret = EXIT_FAILURE;
 #if defined(__arm__) && !defined(__ARM_PCS_VFP)

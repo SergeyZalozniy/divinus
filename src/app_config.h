@@ -104,6 +104,9 @@ struct AppConfig {
     unsigned int mp4_intraRefreshNum;
     unsigned int mp4_intraRefreshQp;
     int mp4_ipQpDelta;
+    bool mp4_roiEnable;
+    unsigned int mp4_roiX, mp4_roiY, mp4_roiW, mp4_roiH;
+    int mp4_roiQpDelta;
 
     // [sub]
     bool sub_enable;
@@ -120,6 +123,9 @@ struct AppConfig {
     unsigned int sub_intraRefreshNum;
     unsigned int sub_intraRefreshQp;
     int sub_ipQpDelta;
+    bool sub_roiEnable;
+    unsigned int sub_roiX, sub_roiY, sub_roiW, sub_roiH;
+    int sub_roiQpDelta;
 
     // [jpeg]
     bool jpeg_enable;

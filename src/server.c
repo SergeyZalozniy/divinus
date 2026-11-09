@@ -1359,6 +1359,31 @@ void respond_request(http_request_t *req) {
                         app_config.mp4_ipQpDelta = HAL_IPQPDELTA_AUTO;
                     else if (parse_ranged(value, -10, 30, &result))
                         app_config.mp4_ipQpDelta = result;
+                } else if (EQUALS(key, "roi_enable")) {
+                    if (EQUALS_CASE(value, "true") || EQUALS(value, "1"))
+                        app_config.mp4_roiEnable = 1;
+                    else if (EQUALS_CASE(value, "false") || EQUALS(value, "0"))
+                        app_config.mp4_roiEnable = 0;
+                } else if (EQUALS(key, "roi_x")) {
+                    long result;
+                    if (parse_ranged(value, 0, 99, &result))
+                        app_config.mp4_roiX = result;
+                } else if (EQUALS(key, "roi_y")) {
+                    long result;
+                    if (parse_ranged(value, 0, 99, &result))
+                        app_config.mp4_roiY = result;
+                } else if (EQUALS(key, "roi_w")) {
+                    long result;
+                    if (parse_ranged(value, 1, 100, &result))
+                        app_config.mp4_roiW = result;
+                } else if (EQUALS(key, "roi_h")) {
+                    long result;
+                    if (parse_ranged(value, 1, 100, &result))
+                        app_config.mp4_roiH = result;
+                } else if (EQUALS(key, "roi_qp_delta")) {
+                    long result;
+                    if (parse_ranged(value, -10, 10, &result))
+                        app_config.mp4_roiQpDelta = result;
                 }
             }
 
@@ -1391,6 +1416,14 @@ void respond_request(http_request_t *req) {
                 live->cropW, live->cropH, live->cropX, live->cropY);
         if (app_config.mp4_ipQpDelta != HAL_IPQPDELTA_AUTO)
             sprintf(ipqpdelta, "%d", app_config.mp4_ipQpDelta);
+        char roi[96], roipx[64] = "null";
+        sprintf(roi, "{\"enable\":%s,\"x\":%u,\"y\":%u,\"w\":%u,\"h\":%u,"
+            "\"qp_delta\":%d}", app_config.mp4_roiEnable ? "true" : "false",
+            app_config.mp4_roiX, app_config.mp4_roiY, app_config.mp4_roiW,
+            app_config.mp4_roiH, app_config.mp4_roiQpDelta);
+        if (live && live->roiOn)
+            sprintf(roipx, "{\"x\":%u,\"y\":%u,\"w\":%u,\"h\":%u}",
+                live->roiX, live->roiY, live->roiW, live->roiH);
         respLen = sprintf(response,
             "HTTP/1.1 200 OK\r\n"
             "Content-Type: application/json;charset=UTF-8\r\n"
@@ -1401,14 +1434,14 @@ void respond_request(http_request_t *req) {
             "\"intra_refresh\":%s,\"intra_refresh_mode\":\"%s\",\"intra_refresh_num\":%d,"
             "\"intra_refresh_qp\":%d,\"ip_qp_delta\":%s,"
             "\"intra_refresh_active\":%s,\"intra_refresh_num_effective\":%u,"
-            "\"crop\":%s}",
+            "\"crop\":%s,\"roi\":%s,\"roi_px\":%s}",
             app_config.mp4_enable ? "true" : "false", app_config.mp4_width, app_config.mp4_height,
             app_config.mp4_fps, app_config.mp4_gop, h265, mode, profile, app_config.mp4_bitrate,
             app_config.mp4_intraRefresh ? "true" : "false",
             app_config.mp4_intraRefreshMode == HAL_IREFMODE_COLUMN ? "column" : "row",
             app_config.mp4_intraRefreshNum, app_config.mp4_intraRefreshQp, ipqpdelta,
             live && live->irefActive ? "true" : "false", live ? live->irefNum : 0,
-            crop);
+            crop, roi, roipx);
         send_and_close(req->clntFd, response, respLen);
         return;
     }
@@ -1493,6 +1526,31 @@ void respond_request(http_request_t *req) {
                         app_config.sub_ipQpDelta = HAL_IPQPDELTA_AUTO;
                     else if (parse_ranged(value, -10, 30, &result))
                         app_config.sub_ipQpDelta = result;
+                } else if (EQUALS(key, "roi_enable")) {
+                    if (EQUALS_CASE(value, "true") || EQUALS(value, "1"))
+                        app_config.sub_roiEnable = 1;
+                    else if (EQUALS_CASE(value, "false") || EQUALS(value, "0"))
+                        app_config.sub_roiEnable = 0;
+                } else if (EQUALS(key, "roi_x")) {
+                    long result;
+                    if (parse_ranged(value, 0, 99, &result))
+                        app_config.sub_roiX = result;
+                } else if (EQUALS(key, "roi_y")) {
+                    long result;
+                    if (parse_ranged(value, 0, 99, &result))
+                        app_config.sub_roiY = result;
+                } else if (EQUALS(key, "roi_w")) {
+                    long result;
+                    if (parse_ranged(value, 1, 100, &result))
+                        app_config.sub_roiW = result;
+                } else if (EQUALS(key, "roi_h")) {
+                    long result;
+                    if (parse_ranged(value, 1, 100, &result))
+                        app_config.sub_roiH = result;
+                } else if (EQUALS(key, "roi_qp_delta")) {
+                    long result;
+                    if (parse_ranged(value, -10, 10, &result))
+                        app_config.sub_roiQpDelta = result;
                 }
             }
 
@@ -1526,6 +1584,14 @@ void respond_request(http_request_t *req) {
                 live->cropW, live->cropH, live->cropX, live->cropY);
         if (app_config.sub_ipQpDelta != HAL_IPQPDELTA_AUTO)
             sprintf(ipqpdelta, "%d", app_config.sub_ipQpDelta);
+        char roi[96], roipx[64] = "null";
+        sprintf(roi, "{\"enable\":%s,\"x\":%u,\"y\":%u,\"w\":%u,\"h\":%u,"
+            "\"qp_delta\":%d}", app_config.sub_roiEnable ? "true" : "false",
+            app_config.sub_roiX, app_config.sub_roiY, app_config.sub_roiW,
+            app_config.sub_roiH, app_config.sub_roiQpDelta);
+        if (live && live->roiOn)
+            sprintf(roipx, "{\"x\":%u,\"y\":%u,\"w\":%u,\"h\":%u}",
+                live->roiX, live->roiY, live->roiW, live->roiH);
         respLen = sprintf(response,
             "HTTP/1.1 200 OK\r\n"
             "Content-Type: application/json;charset=UTF-8\r\n"
@@ -1536,7 +1602,7 @@ void respond_request(http_request_t *req) {
             "\"intra_refresh\":%s,\"intra_refresh_mode\":\"%s\",\"intra_refresh_num\":%d,"
             "\"intra_refresh_qp\":%d,\"ip_qp_delta\":%s,"
             "\"intra_refresh_active\":%s,\"intra_refresh_num_effective\":%u,"
-            "\"crop\":%s}",
+            "\"crop\":%s,\"roi\":%s,\"roi_px\":%s}",
             app_config.sub_enable ? "true" : "false", app_config.sub_width, app_config.sub_height,
             app_config.sub_fps, app_config.sub_gop, app_config.sub_codecH265 ? "true" : "false",
             mode, profile, app_config.sub_bitrate,
@@ -1544,7 +1610,7 @@ void respond_request(http_request_t *req) {
             app_config.sub_intraRefreshMode == HAL_IREFMODE_COLUMN ? "column" : "row",
             app_config.sub_intraRefreshNum, app_config.sub_intraRefreshQp, ipqpdelta,
             live && live->irefActive ? "true" : "false", live ? live->irefNum : 0,
-            crop);
+            crop, roi, roipx);
         send_and_close(req->clntFd, response, respLen);
         return;
     }

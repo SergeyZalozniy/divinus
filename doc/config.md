@@ -103,6 +103,9 @@ With the sub stream enabled, the URL path picks the video stream: `/sub` or a pa
 - **intra_refresh_num**: Number of rows or columns intra coded per frame (default: `1`). A sweep has to fit into one GOP (`gop * intra_refresh_num >= ceil(height / 32)` CTU rows for H.265, `/ 16` for H.264); when it does not, the channel runs with `ceil(rows / gop)` instead and the log says so (see `/api/mp4` in [endpoints.md](endpoints.md)).
 - **intra_refresh_qp**: QP for the requested I-frames, 0-51 (default: `0`).
 - **ip_qp_delta**: QP difference between I and P frames, -10 to 30, or `auto`: GOP length divided by the framerate, or `0` with `intra_refresh`, where the GOP start is not a keyframe and a lower QP would only inflate it; only on HiSilicon/Goke v4 at the moment (default: `auto`).
+- **roi_enable**: Boolean to turn on one encoder region of interest for H.264/H.265 with a relative QP, so that part of the picture gets more bits at the same bitrate; only on HiSilicon/Goke v4 at the moment (default: `false`).
+- **roi_x**, **roi_y**, **roi_w**, **roi_h**: The rectangle in percent of the encoded picture (after any centre crop), origin 0-99, size 1-100, snapped outwards to 16 pixels and clamped to the picture (defaults: `25`, `25`, `50`, `50` = centred half width and height).
+- **roi_qp_delta**: QP added inside the rectangle, -10 to 10; negative means better quality inside, worse outside (default: `-4`).
 
 ## Sub section
 
@@ -110,7 +113,7 @@ Optional second H.264/H.265 stream from the same sensor, scaled down by its own 
 
 - **enable**: Boolean to activate the sub stream (default: `false`).
 - **codec**, **mode**, **width**, **height**, **fps**, **gop**, **profile**, **bitrate**: Same meaning as in the MP4 section (defaults: H.264, CBR, 640x360, 15 fps, GOP = fps, MP, 512 kbps).
-- **intra_refresh**, **intra_refresh_mode**, **intra_refresh_num**, **intra_refresh_qp**, **ip_qp_delta**: Same meaning and defaults as in the MP4 section.
+- **intra_refresh**, **intra_refresh_mode**, **intra_refresh_num**, **intra_refresh_qp**, **ip_qp_delta**, **roi_enable**, **roi_x**, **roi_y**, **roi_w**, **roi_h**, **roi_qp_delta**: Same meaning and defaults as in the MP4 section.
 
 ## OSD section
 
