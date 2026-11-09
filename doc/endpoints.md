@@ -91,6 +91,64 @@ Configures or reads the real-time clock.
 }
 ```
 
+### Network
+
+#### `/api/network`
+
+Reads or sets the IPv4 configuration of the primary interface (`eth0`). Behind the same
+authentication as every other endpoint. Plain Linux, no HAL involved, and not part of
+`divinus.yaml` (no `/api/cmd?save` needed).
+
+On OpenIPC, `S40network` brings `eth0` up at boot with `ifup eth0`, from the stanza in
+`/etc/network/interfaces.d/eth0` (the file OpenIPC's `setnetwork` writes). That file is what
+a change persists to: the `iface` line and the `address`/`netmask`/`gateway` lines are
+rewritten in `setnetwork`'s layout, every other line (`hwaddress`, `pre-up` nameserver, ...)
+is kept as it was, and the file is replaced atomically (temporary file, `fsync`, `rename`).
+Writing the same configuration again leaves the file untouched. For a static address the
+U-Boot environment (`ipaddr`, `netmask`, `gatewayip`) is mirrored as well, after the live
+change; only the bootloader reads it.
+
+| Method | Parameters | Description |
+|--------|------------|-------------|
+| GET    | (none)     | Live address of `eth0`, plus what is persisted |
+| GET    | `mode`     | `static` or `dhcp`; required to change anything |
+| GET    | `ip`       | Static address (dotted quad), not the network or broadcast address of its subnet |
+| GET    | `mask`     | Netmask (dotted quad, contiguous, /8 to /30) |
+| GET    | `gateway`  | Optional default gateway, inside the subnet; omitted or empty = no default route |
+| GET    | `apply`    | `false` (or `0`, `no`) = persist only, the change takes effect at the next boot |
+
+**Response (read)**
+```json
+{
+  "interface": "eth0",
+  "mode": "static",          // "dhcp" while udhcpc runs on eth0
+  "ip": "192.168.5.11",      // live values, null when eth0 has no IPv4 address
+  "mask": "255.255.255.0",
+  "gateway": "192.168.5.1",  // live default route via eth0, or null
+  "mac": "00:12:33:ac:82:b1",
+  "link_local": false,       // live address in 169.254.0.0/16
+  "persisted": {"mode": "static", "ip": "192.168.5.11", "mask": "255.255.255.0", "gateway": "192.168.5.1"},
+  "pending": null            // the persisted configuration when it differs from the live one
+}
+```
+
+**Response (change)**
+```json
+{"ok": true, "applied_in_s": 1.5, "new_ip": "192.168.5.12", "persisted": {...}}
+```
+
+`applied_in_s` is `null` with `apply=false`, `new_ip` is `null` for `dhcp`. Invalid input
+returns `400` with `{"ok":false,"error":"..."}` (for example `gateway is outside the subnet`),
+a failed write `500`. Nothing is applied unless the file was written first.
+
+> **Warning:** the response is sent before the address changes. The live change runs in a
+> detached shell 1.5 s later (flush the IPv4 addresses of `eth0`, add the new one, replace
+> the default route, unsolicited ARP); every step is logged to syslog with the tag `divinus`.
+> The client must then re-discover the camera at the new address: the old one stops
+> answering, and existing RTSP and HTTP connections to it are lost. `mode=dhcp` with `apply`
+> runs `ifdown`/`ifup eth0`, which is what the camera does at boot: without a DHCP server
+> on the link, `eth0` may end up with no IPv4 address (or only what the rootfs falls back to).
+
 ### Video Configuration
 
 #### `/api/jpeg`

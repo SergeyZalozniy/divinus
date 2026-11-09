@@ -764,6 +764,460 @@ static bool respond_majestic(http_request_t *req) {
     return false;
 }
 
+/* IPv4 configuration of the primary interface (/api/network). On OpenIPC,
+   S40network brings eth0 up at boot with "ifup eth0", i.e. from the stanza in
+   /etc/network/interfaces.d/eth0 (the file OpenIPC's setnetwork writes, on
+   the writable overlay). The U-Boot env (ipaddr, netmask, gatewayip) is only
+   read by the bootloader; it is mirrored for static addresses, as setnetwork
+   users do by hand. A change is persisted to the stanza first (temp file +
+   rename), then applied live by a detached shell after a delay, so that the
+   HTTP answer still reaches the client at the old address. */
+#define NET_IFACE "eth0"
+#define NET_IFACE_FILE "/etc/network/interfaces.d/" NET_IFACE
+#define NET_DHCP_PID "/var/run/udhcpc." NET_IFACE ".pid"
+#define NET_APPLY_DELAY "1.5"
+
+extern char **environ;
+
+typedef struct {
+    bool dhcp, has_ip, has_mask, has_gw;
+    struct in_addr ip, mask, gw;
+} net_conf;
+
+static int net_prefix(struct in_addr mask) {
+    uint32_t m = ntohl(mask.s_addr), inv = ~m;
+    if (inv & (inv + 1)) return -1;
+    return __builtin_popcount(m);
+}
+
+static bool net_parse_addr(const char *text, struct in_addr *addr) {
+    return text && inet_pton(AF_INET, text, addr) == 1;
+}
+
+/* NULL when the configuration is usable, else the reason */
+static const char *net_validate(const net_conf *c) {
+    if (c->dhcp) return NULL;
+    if (!c->has_ip) return "ip is missing or not a dotted quad";
+    if (!c->has_mask) return "mask is missing or not a dotted quad";
+    int prefix = net_prefix(c->mask);
+    if (prefix < 8 || prefix > 30) return "mask is not a netmask between /8 and /30";
+    uint32_t ip = ntohl(c->ip.s_addr), mask = ntohl(c->mask.s_addr);
+    if ((ip >> 24) == 0 || (ip >> 24) == 127 || (ip >> 24) >= 224)
+        return "ip is not a unicast host address";
+    if ((ip & ~mask) == 0) return "ip is the network address of the subnet";
+    if ((ip & ~mask) == ~mask) return "ip is the broadcast address of the subnet";
+    if (c->has_gw) {
+        uint32_t gw = ntohl(c->gw.s_addr);
+        if ((gw & mask) != (ip & mask)) return "gateway is outside the subnet";
+        if (gw == ip) return "gateway equals ip";
+        if ((gw & ~mask) == 0 || (gw & ~mask) == ~mask)
+            return "gateway is the network or broadcast address";
+    }
+    return NULL;
+}
+
+static bool net_dhcp_running(void) {
+    char buf[32] = {0}, path[48];
+    FILE *f = fopen(NET_DHCP_PID, "r");
+    if (!f) return false;
+    int pid = fgets(buf, sizeof(buf), f) ? atoi(buf) : 0;
+    fclose(f);
+    if (pid <= 0) return false;
+    snprintf(path, sizeof(path), "/proc/%d/comm", pid);
+    if (!(f = fopen(path, "r"))) return false;
+    bool ok = fgets(buf, sizeof(buf), f) && STARTS_WITH(buf, "udhcpc");
+    fclose(f);
+    return ok;
+}
+
+/* Live address, netmask, default gateway and MAC of NET_IFACE */
+static void net_live(net_conf *c, char *mac, size_t macSize) {
+    memset(c, 0, sizeof(*c));
+    *mac = '\0';
+    c->dhcp = net_dhcp_running();
+
+    int fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd >= 0) {
+        struct ifreq ifr;
+        memset(&ifr, 0, sizeof(ifr));
+        strncpy(ifr.ifr_name, NET_IFACE, IFNAMSIZ - 1);
+        if (!ioctl(fd, SIOCGIFADDR, &ifr)) {
+            c->ip = ((struct sockaddr_in *)&ifr.ifr_addr)->sin_addr;
+            c->has_ip = true;
+        }
+        if (c->has_ip && !ioctl(fd, SIOCGIFNETMASK, &ifr)) {
+            c->mask = ((struct sockaddr_in *)&ifr.ifr_netmask)->sin_addr;
+            c->has_mask = true;
+        }
+        if (!ioctl(fd, SIOCGIFHWADDR, &ifr)) {
+            unsigned char *hw = (unsigned char *)ifr.ifr_hwaddr.sa_data;
+            snprintf(mac, macSize, "%02x:%02x:%02x:%02x:%02x:%02x",
+                hw[0], hw[1], hw[2], hw[3], hw[4], hw[5]);
+        }
+        close(fd);
+    }
+
+    FILE *f = fopen("/proc/net/route", "r");
+    if (!f) return;
+    char line[256], name[IFNAMSIZ];
+    unsigned int dest, gw, flags;
+    while (fgets(line, sizeof(line), f)) {
+        if (sscanf(line, "%15s %x %x %x", name, &dest, &gw, &flags) != 4) continue;
+        if (!EQUALS(name, NET_IFACE) || dest || !(flags & 0x2)) continue;
+        c->gw.s_addr = gw;
+        c->has_gw = true;
+        break;
+    }
+    fclose(f);
+}
+
+static int net_read_file(char *buf, size_t size) {
+    int fd = open(NET_IFACE_FILE, O_RDONLY);
+    if (fd < 0) return 0;
+    int len = read(fd, buf, size - 1);
+    close(fd);
+    if (len < 0) len = 0;
+    buf[len] = '\0';
+    return len;
+}
+
+/* First word of a stanza line and the rest, e.g. "address" "192.168.1.10" */
+static bool net_line_key(const char *line, const char *key, char *arg, size_t argSize) {
+    while (*line == ' ' || *line == '\t') line++;
+    size_t n = strlen(key);
+    if (strncmp(line, key, n) || (line[n] != ' ' && line[n] != '\t')) return false;
+    if (arg) {
+        line += n;
+        while (*line == ' ' || *line == '\t') line++;
+        size_t len = strcspn(line, " \t\r\n");
+        if (len >= argSize) len = argSize - 1;
+        memcpy(arg, line, len);
+        arg[len] = '\0';
+    }
+    return true;
+}
+
+/* The configuration NET_IFACE comes up with after a reboot */
+static bool net_persisted(net_conf *c) {
+    char buf[4096], arg[64];
+    memset(c, 0, sizeof(*c));
+    if (!net_read_file(buf, sizeof(buf))) return false;
+    bool found = false;
+    for (char *line = buf, *next; line && *line; line = next) {
+        if ((next = strchr(line, '\n'))) *next++ = '\0';
+        if (net_line_key(line, "iface", arg, sizeof(arg))) {
+            found = EQUALS(arg, NET_IFACE);
+            c->dhcp = found && strstr(line, " dhcp");
+        } else if (net_line_key(line, "address", arg, sizeof(arg)))
+            c->has_ip = net_parse_addr(arg, &c->ip);
+        else if (net_line_key(line, "netmask", arg, sizeof(arg)))
+            c->has_mask = net_parse_addr(arg, &c->mask);
+        else if (net_line_key(line, "gateway", arg, sizeof(arg)))
+            c->has_gw = net_parse_addr(arg, &c->gw);
+    }
+    return found;
+}
+
+static int net_append(char *out, size_t size, int len, const char *fmt, ...) {
+    if (len < 0 || len >= (int)size) return -1;
+    va_list args;
+    va_start(args, fmt);
+    int n = vsnprintf(out + len, size - len, fmt, args);
+    va_end(args);
+    return (n < 0 || len + n >= (int)size) ? -1 : len + n;
+}
+
+static int net_append_static(char *out, size_t size, int len, const net_conf *c) {
+    char ip[INET_ADDRSTRLEN], mask[INET_ADDRSTRLEN], gw[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &c->ip, ip, sizeof(ip));
+    inet_ntop(AF_INET, &c->mask, mask, sizeof(mask));
+    len = net_append(out, size, len, "    address %s\n    netmask %s\n", ip, mask);
+    if (c->has_gw) {
+        inet_ntop(AF_INET, &c->gw, gw, sizeof(gw));
+        len = net_append(out, size, len, "    gateway %s\n", gw);
+    }
+    return len;
+}
+
+/* Rewrites the stanza in setnetwork's layout ("iface", "hwaddress",
+   "address", "netmask", "gateway", then the other lines), keeping every
+   other line (hwaddress, pre-up nameserver, ...) as it was. Returns 1 when
+   the file was rewritten, 0 when it already had this content, -1 on error. */
+static int net_persist(const net_conf *c) {
+    char old[4096], out[4096], copy[4096];
+    int oldLen = net_read_file(old, sizeof(old)), len = 0;
+    bool hwaddr = false, placed = false;
+
+    memcpy(copy, old, oldLen + 1);
+    for (char *line = copy, *next; line && *line; line = next) {
+        if ((next = strchr(line, '\n'))) *next++ = '\0';
+        if (net_line_key(line, "hwaddress", NULL, 0)) hwaddr = true;
+    }
+
+    len = net_append(out, sizeof(out), len, "iface %s inet %s\n",
+        NET_IFACE, c->dhcp ? "dhcp" : "static");
+    if (!oldLen) {
+        len = net_append(out, sizeof(out), len, "    hwaddress ether "
+            "$(get_mac %s 2>/dev/null || cat /sys/class/net/%s/address)\n",
+            NET_IFACE, NET_IFACE);
+        hwaddr = true;
+    }
+    if (!c->dhcp && !hwaddr) {
+        len = net_append_static(out, sizeof(out), len, c);
+        placed = true;
+    }
+
+    memcpy(copy, old, oldLen + 1);
+    for (char *line = copy; line && *line; ) {
+        char *next = strchr(line, '\n');
+        if (next) *next++ = '\0';
+        if (!net_line_key(line, "iface", NULL, 0) &&
+            !net_line_key(line, "address", NULL, 0) &&
+            !net_line_key(line, "netmask", NULL, 0) &&
+            !net_line_key(line, "gateway", NULL, 0)) {
+            len = net_append(out, sizeof(out), len, "%s\n", line);
+            if (!c->dhcp && !placed && net_line_key(line, "hwaddress", NULL, 0)) {
+                len = net_append_static(out, sizeof(out), len, c);
+                placed = true;
+            }
+        }
+        line = next;
+    }
+    if (!c->dhcp && !placed)
+        len = net_append_static(out, sizeof(out), len, c);
+    if (len < 0) return -1;
+
+    if (len == oldLen && !memcmp(out, old, len)) return 0;
+
+    const char *tmp = NET_IFACE_FILE ".tmp";
+    int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) return -1;
+    bool ok = write(fd, out, len) == len && !fsync(fd);
+    if (close(fd)) ok = false;
+    if (!ok || rename(tmp, NET_IFACE_FILE)) {
+        unlink(tmp);
+        return -1;
+    }
+    sync();
+    return 1;
+}
+
+/* Runs the live change in a detached shell after NET_APPLY_DELAY seconds;
+   every step goes to syslog with the tag "divinus". */
+static int net_apply(const net_conf *c) {
+    char script[2048], ip[INET_ADDRSTRLEN], mask[INET_ADDRSTRLEN],
+        gw[INET_ADDRSTRLEN] = "", brd[INET_ADDRSTRLEN];
+    int len;
+
+    if (c->dhcp) {
+        len = snprintf(script, sizeof(script),
+            "( sleep " NET_APPLY_DELAY "\n"
+            "  logger -t divinus \"network: applying dhcp on " NET_IFACE "\"\n"
+            "  ifdown -f " NET_IFACE "\n"
+            "  ip -4 addr flush dev " NET_IFACE "\n"
+            "  ifup -f " NET_IFACE "\n"
+            "  logger -t divinus \"network: " NET_IFACE " now $(ip -4 -o addr show dev " NET_IFACE
+                " | awk '{print $4}')\"\n"
+            ") </dev/null >/dev/null 2>&1 &\n");
+    } else {
+        struct in_addr b = { c->ip.s_addr | ~c->mask.s_addr };
+        char route[96] = ":", env[160] = ":";
+        int prefix = net_prefix(c->mask);
+        inet_ntop(AF_INET, &c->ip, ip, sizeof(ip));
+        inet_ntop(AF_INET, &c->mask, mask, sizeof(mask));
+        inet_ntop(AF_INET, &b, brd, sizeof(brd));
+        if (c->has_gw) {
+            inet_ntop(AF_INET, &c->gw, gw, sizeof(gw));
+            snprintf(route, sizeof(route),
+                "ip route replace default via %s dev " NET_IFACE, gw);
+            snprintf(env, sizeof(env), "[ \"$(fw_printenv -n gatewayip 2>/dev/null)\" = %s ] || "
+                "fw_setenv gatewayip %s", gw, gw);
+        }
+        len = snprintf(script, sizeof(script),
+            "( sleep " NET_APPLY_DELAY "\n"
+            "  logger -t divinus \"network: applying static %s/%d gateway %s on " NET_IFACE "\"\n"
+            "  [ -r " NET_DHCP_PID " ] && kill $(cat " NET_DHCP_PID ") 2>/dev/null\n"
+            "  ip -4 addr flush dev " NET_IFACE "\n"
+            "  ip addr add %s/%d broadcast %s dev " NET_IFACE "\n"
+            "  ip link set " NET_IFACE " up\n"
+            "  %s\n"
+            "  logger -t divinus \"network: " NET_IFACE " now $(ip -4 -o addr show dev " NET_IFACE
+                " | awk '{print $4}'), $(ip route | grep ^default)\"\n"
+            "  arping -U -c 2 -I " NET_IFACE " %s >/dev/null 2>&1\n"
+            "  [ \"$(fw_printenv -n ipaddr 2>/dev/null)\" = %s ] || fw_setenv ipaddr %s\n"
+            "  [ \"$(fw_printenv -n netmask 2>/dev/null)\" = %s ] || fw_setenv netmask %s\n"
+            "  %s\n"
+            "  logger -t divinus \"network: U-Boot env ipaddr=$(fw_printenv -n ipaddr) "
+                "netmask=$(fw_printenv -n netmask) gatewayip=$(fw_printenv -n gatewayip)\"\n"
+            ") </dev/null >/dev/null 2>&1 &\n",
+            ip, prefix, *gw ? gw : "none", ip, prefix, brd, route,
+            ip, ip, ip, mask, mask, env);
+    }
+    if (len < 0 || len >= (int)sizeof(script)) return -1;
+
+    /* Nothing of ours may leak into the shell: an inherited client socket
+       would keep the HTTP connection open until the shell exits */
+    DIR *dir = opendir("/proc/self/fd");
+    if (dir) {
+        struct dirent *entry;
+        while ((entry = readdir(dir))) {
+            int fd = atoi(entry->d_name);
+            if (fd > 2)
+                fcntl(fd, F_SETFD, fcntl(fd, F_GETFD) | FD_CLOEXEC);
+        }
+        closedir(dir);
+    }
+
+    pid_t pid;
+    char *argv[] = { "sh", "-c", script, NULL };
+    int err = posix_spawn(&pid, "/bin/sh", NULL, NULL, argv, environ);
+    if (err) {
+        HAL_WARNING("server", "Network apply: cannot start /bin/sh (%s)\n", strerror(err));
+        return -1;
+    }
+    /* The shell only forks the delayed subshell and exits */
+    waitpid(pid, NULL, 0);
+    return 0;
+}
+
+static void net_json_conf(char *buf, size_t size, const net_conf *c) {
+    char ip[INET_ADDRSTRLEN], mask[INET_ADDRSTRLEN], gw[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &c->ip, ip, sizeof(ip));
+    inet_ntop(AF_INET, &c->mask, mask, sizeof(mask));
+    inet_ntop(AF_INET, &c->gw, gw, sizeof(gw));
+    snprintf(buf, size,
+        "\"mode\":\"%s\",\"ip\":%s%s%s,\"mask\":%s%s%s,\"gateway\":%s%s%s",
+        c->dhcp ? "dhcp" : "static",
+        c->has_ip ? "\"" : "", c->has_ip ? ip : "null", c->has_ip ? "\"" : "",
+        c->has_mask ? "\"" : "", c->has_mask ? mask : "null", c->has_mask ? "\"" : "",
+        c->has_gw ? "\"" : "", c->has_gw ? gw : "null", c->has_gw ? "\"" : "");
+}
+
+static bool net_same(const net_conf *a, const net_conf *b) {
+    if (a->dhcp != b->dhcp) return false;
+    if (a->dhcp) return true;
+    return a->has_ip == b->has_ip && a->ip.s_addr == b->ip.s_addr &&
+        a->has_mask == b->has_mask && a->mask.s_addr == b->mask.s_addr &&
+        a->has_gw == b->has_gw && (!a->has_gw || a->gw.s_addr == b->gw.s_addr);
+}
+
+static void net_send_error(int fd, int code, const char *error) {
+    char buf[512];
+    int len = snprintf(buf, sizeof(buf),
+        "HTTP/1.1 %d %s\r\n"
+        "Content-Type: application/json;charset=UTF-8\r\n"
+        "Connection: close\r\n"
+        "\r\n"
+        "{\"ok\":false,\"error\":\"%s\"}",
+        code, code == 400 ? "Bad Request" : "Internal Server Error", error);
+    send_and_close(fd, buf, len);
+}
+
+static void respond_network(http_request_t *req) {
+    char response[1024], live_json[256], disk_json[256], mac[18];
+    bool set = false, other = false, apply = true;
+    const char *error = NULL;
+    net_conf want = {0};
+    int respLen;
+
+    while (req->query) {
+        char *value = split(&req->query, "&");
+        if (!value || !*value) continue;
+        unescape_uri(value);
+        char *key = split(&value, "=");
+        if (!key || !*key) continue;
+        if (!value) value = "";
+        if (EQUALS(key, "mode")) {
+            set = true;
+            if (EQUALS(value, "dhcp")) want.dhcp = true;
+            else if (!EQUALS(value, "static")) error = "mode must be static or dhcp";
+        } else if (EQUALS(key, "ip")) {
+            other = true;
+            if (!(want.has_ip = net_parse_addr(value, &want.ip)))
+                error = "ip is not a dotted quad";
+        } else if (EQUALS(key, "mask")) {
+            other = true;
+            if (!(want.has_mask = net_parse_addr(value, &want.mask)))
+                error = "mask is not a dotted quad";
+        } else if (EQUALS(key, "gateway")) {
+            other = true;
+            if (*value && !(want.has_gw = net_parse_addr(value, &want.gw)))
+                error = "gateway is not a dotted quad";
+        } else if (EQUALS(key, "apply")) {
+            other = true;
+            apply = !(EQUALS(value, "false") || EQUALS(value, "0") || EQUALS(value, "no"));
+        }
+    }
+
+    if (other && !set && !error) error = "mode must be static or dhcp";
+    if (error && !set) {
+        net_send_error(req->clntFd, 400, error);
+        return;
+    }
+    if (set) {
+        if (!error) error = net_validate(&want);
+        if (error) {
+            HAL_WARNING("server", "Network change refused: %s\n", error);
+            net_send_error(req->clntFd, 400, error);
+            return;
+        }
+        if (want.dhcp) want.has_ip = want.has_mask = want.has_gw = false;
+        net_json_conf(disk_json, sizeof(disk_json), &want);
+        int saved = net_persist(&want);
+        if (saved < 0) {
+            HAL_DANGER("server", "Network change: writing " NET_IFACE_FILE " failed (%s)\n",
+                strerror(errno));
+            net_send_error(req->clntFd, 500, "cannot write " NET_IFACE_FILE);
+            return;
+        }
+        HAL_INFO("server", "Network change {%s}: " NET_IFACE_FILE " %s\n",
+            disk_json, saved ? "rewritten" : "already had it");
+        if (apply) {
+            if (net_apply(&want)) {
+                net_send_error(req->clntFd, 500, "persisted, but the live apply could not start");
+                return;
+            }
+            HAL_INFO("server", "Network change: applying on " NET_IFACE " in "
+                NET_APPLY_DELAY " s\n");
+        }
+
+        char ip[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &want.ip, ip, sizeof(ip));
+        respLen = snprintf(response, sizeof(response),
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: application/json;charset=UTF-8\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+            "{\"ok\":true,\"applied_in_s\":%s,\"new_ip\":%s%s%s,\"persisted\":{%s}}",
+            apply ? NET_APPLY_DELAY : "null",
+            want.dhcp ? "" : "\"", want.dhcp ? "null" : ip, want.dhcp ? "" : "\"",
+            disk_json);
+        send_and_close(req->clntFd, response, respLen);
+        return;
+    }
+
+    net_conf live, disk;
+    net_live(&live, mac, sizeof(mac));
+    bool persisted = net_persisted(&disk);
+    net_json_conf(live_json, sizeof(live_json), &live);
+    if (persisted) net_json_conf(disk_json, sizeof(disk_json), &disk);
+    bool link_local = live.has_ip &&
+        (ntohl(live.ip.s_addr) & 0xFFFF0000) == 0xA9FE0000;
+    bool pending = persisted && !net_same(&live, &disk);
+
+    respLen = snprintf(response, sizeof(response),
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: application/json;charset=UTF-8\r\n"
+        "Connection: close\r\n"
+        "\r\n"
+        "{\"interface\":\"" NET_IFACE "\",%s,\"mac\":\"%s\",\"link_local\":%s,"
+        "\"persisted\":%s%s%s,\"pending\":%s%s%s}",
+        live_json, mac, link_local ? "true" : "false",
+        persisted ? "{" : "", persisted ? disk_json : "null", persisted ? "}" : "",
+        pending ? "{" : "", pending ? disk_json : "null", pending ? "}" : "");
+    send_and_close(req->clntFd, response, respLen);
+}
+
 void respond_request(http_request_t *req) {
     char response[8192] = {0};
     int respLen = 0;
@@ -2027,6 +2481,11 @@ void respond_request(http_request_t *req) {
             chip, si.loads[0] / 65536.0, si.loads[1] / 65536.0, si.loads[2] / 65536.0,
             memory, sensor, hal_temperature_read(), uptime);
         send_and_close(req->clntFd, response, respLen);
+        return;
+    }
+
+    if (EQUALS(req->uri, "/api/network")) {
+        respond_network(req);
         return;
     }
 

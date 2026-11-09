@@ -1,6 +1,7 @@
 #pragma once
 
 #include <arpa/inet.h>
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <netinet/in.h>
@@ -8,12 +9,16 @@
 #include <poll.h>
 #include <regex.h>
 #include <signal.h>
+#include <spawn.h>
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/uio.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
