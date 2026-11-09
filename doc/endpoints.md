@@ -174,9 +174,23 @@ Configures the H.26x MP4 stream.
   "intra_refresh_mode": "row",
   "intra_refresh_num": 1,
   "intra_refresh_qp": 0,
-  "ip_qp_delta": "auto"
+  "ip_qp_delta": "auto",
+  "intra_refresh_active": false,
+  "intra_refresh_num_effective": 0
 }
 ```
+
+The `intra_refresh*` fields above `ip_qp_delta` echo the configuration; the last two report the running encoder
+(HiSilicon/Goke v4 only, `false`/`0` elsewhere or while the stream is off): `intra_refresh_active` says whether the
+SDK accepted intra refresh on the live channel, `intra_refresh_num_effective` the rows (or columns) it refreshes per
+frame.
+
+**GOP vs. refresh sweep.** One refresh sweep must fit into one GOP: `gop * intra_refresh_num >= lines`, where
+`lines = ceil(height / 32)` for H.265 (CTU rows; `width` for the column mode) and `ceil(height / 16)` for H.264
+(macroblock rows). Otherwise the SDK rejects the setting and the encoder silently falls back to plain IDR GOPs. So
+when the GOP is shorter than the sweep, divinus raises the per-frame count for that channel to
+`ceil(lines / gop)` and logs a warning with the requested and the used value; the stored `intra_refresh_num` is
+not changed. Example: 1280x960 H.265 = 30 rows, `gop=23` runs with 2 rows per frame (`intra_refresh_num_effective: 2`).
 
 #### `/api/sub`
 

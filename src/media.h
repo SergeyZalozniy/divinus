@@ -51,5 +51,7 @@ int media_mp4_disable(void);
 int media_mp4_enable(void);
 int media_sub_disable(void);
 int media_sub_enable(void);
+hal_chnstate *media_mp4_state(void);
+hal_chnstate *media_sub_state(void);
 
 void rtsp_latch_audio_codec(void);

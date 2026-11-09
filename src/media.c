@@ -771,6 +771,23 @@ int media_mp4_disable(void) {
     return EXIT_SUCCESS;
 }
 
+/* Live state of the main / sub encoder channel (what the HAL really
+   applied), NULL while that stream is not running */
+hal_chnstate *media_mp4_state(void) {
+    for (char i = 0; i < chnCount; i++) {
+        if (!chnState[i].enable) continue;
+        if (i == subIndex) continue;
+        if (chnState[i].payload == HAL_VIDCODEC_H264 ||
+            chnState[i].payload == HAL_VIDCODEC_H265) return &chnState[i];
+    }
+    return NULL;
+}
+
+hal_chnstate *media_sub_state(void) {
+    return subIndex >= 0 && chnState[subIndex].enable ?
+        &chnState[subIndex] : NULL;
+}
+
 int media_mp4_enable(void) {
     int ret;
 

@@ -83,6 +83,9 @@ typedef struct {
     char enable;
     char mainLoop;
     hal_vidcodec payload;
+    // What the encoder really runs, where the HAL reports it (v4)
+    char irefActive;
+    unsigned int irefNum;
 } hal_chnstate;
 
 typedef struct {

@@ -100,7 +100,7 @@ With the sub stream enabled, the URL path picks the video stream: `/sub` or a pa
 - **bitrate**: Bitrate in kbps.
 - **intra_refresh**: Boolean to turn on gradual intra refresh (GDR) for H.264/H.265, spreading intra coding over consecutive frames instead of large periodic keyframes; only on HiSilicon/Goke v4 (Hi3516EV200/300, GK7205V200/300) at the moment (default: `false`).
 - **intra_refresh_mode**: Direction of the refresh sweep, `row` or `column` (default: `row`).
-- **intra_refresh_num**: Number of rows or columns intra coded per frame (default: `1`).
+- **intra_refresh_num**: Number of rows or columns intra coded per frame (default: `1`). A sweep has to fit into one GOP (`gop * intra_refresh_num >= ceil(height / 32)` CTU rows for H.265, `/ 16` for H.264); when it does not, the channel runs with `ceil(rows / gop)` instead and the log says so (see `/api/mp4` in [endpoints.md](endpoints.md)).
 - **intra_refresh_qp**: QP for the requested I-frames, 0-51 (default: `0`).
 - **ip_qp_delta**: QP difference between I and P frames, -10 to 30, or `auto`: GOP length divided by the framerate, or `0` with `intra_refresh`, where the GOP start is not a keyframe and a lower QP would only inflate it; only on HiSilicon/Goke v4 at the moment (default: `auto`).
 

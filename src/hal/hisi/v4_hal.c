@@ -752,6 +752,9 @@ int v4_video_create(char index, hal_vidconfig *config)
     if (ret = v4_venc.fnCreateChannel(index, &channel))
         return ret;
 
+    v4_state[index].irefActive = 0;
+    v4_state[index].irefNum = 0;
+
     if ((config->codec == HAL_VIDCODEC_H264 || config->codec == HAL_VIDCODEC_H265) &&
         config->intraRefresh) {
         if (!v4_venc.fnSetIntraRefresh)
@@ -761,13 +764,32 @@ int v4_video_create(char index, hal_vidconfig *config)
                 .mode = config->intraRefreshMode == HAL_IREFMODE_COLUMN ?
                     V4_VENC_INTRAREFRESH_COLUMN : V4_VENC_INTRAREFRESH_ROW,
                 .num = config->intraRefreshNum, .reqIQp = config->intraRefreshQp };
+            /* The sweep (CTU/MB rows or columns, num per frame) has to fit
+               in one GOP, else the SDK rejects it (ILLEGAL_PARAM) and the
+               channel silently falls back to IDR GOPs: refresh more lines
+               per frame instead, the stored setting stays as asked */
+            unsigned int unit = config->codec == HAL_VIDCODEC_H265 ? 32 : 16;
+            unsigned int lines = (iref.mode == V4_VENC_INTRAREFRESH_COLUMN ?
+                config->width : config->height);
+            unsigned int gop = config->gop ? config->gop : 1;
+            lines = (lines + unit - 1) / unit;
+            if (gop * iref.num < lines) {
+                iref.num = (lines + gop - 1) / gop;
+                HAL_WARNING("v4_venc", "Intra refresh on channel %d: %u %s "
+                    "do not fit in gop %u at %u per frame, using %u\n", index,
+                    lines, iref.mode ? "columns" : "rows", gop,
+                    config->intraRefreshNum, iref.num);
+            }
             if (ret = v4_venc.fnSetIntraRefresh(index, &iref))
                 HAL_WARNING("v4_venc", "Enabling intra refresh on channel %d "
                     "failed with %#x!\n", index, ret);
-            else
+            else {
+                v4_state[index].irefActive = 1;
+                v4_state[index].irefNum = iref.num;
                 HAL_INFO("v4_venc", "Intra refresh enabled on channel %d "
                     "(%s, %u, QP %u)\n", index, iref.mode ? "column" : "row",
                     iref.num, iref.reqIQp);
+            }
         }
     }
 
@@ -796,6 +818,8 @@ int v4_video_destroy(char index)
 
     v4_state[index].enable = 0;
     v4_state[index].payload = HAL_VIDCODEC_UNSPEC;
+    v4_state[index].irefActive = 0;
+    v4_state[index].irefNum = 0;
 
     v4_venc.fnStopReceiving(index);
 
