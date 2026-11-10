@@ -78,8 +78,11 @@ static inline int __bufpool_ref_manipulate(bufpool_handle h, void *buf, int val)
 
     p->ref_count += val;
 
+    /* undo an extra detach instead of leaving the count negative: a pooled
+       element at -1 would be handed out again at 0 and freed under its user */
     TEST(p->ref_count >= 0, ({
         ERR("double detach at pointer %p: corrupted use of reference counting\n", buf);
+        p->ref_count -= val;
         return FAILURE;}));
 
     if(p->ref_count == 0) {

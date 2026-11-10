@@ -501,6 +501,13 @@ error:
             __PARSE_ERROR(con);
         }
 
+        /* __read_line() hit EOF (the peer closed before ending a request, e.g. a
+           port probe or a non-RTSP line) and already detached the connection,
+           which closed its socket and returned it to the pool: it must not be
+           answered nor detached a second time. */
+        if (con->con_state == __CON_S_DISCONNECTED)
+            return SUCCESS;
+
         if (con->parser_state == __PARSER_S_ERROR) {
             __method_error(con, h);
         } else {
@@ -516,13 +523,10 @@ error:
                 case __METHOD_RECORDING: __method_record(con, h); break;
                 case __METHOD_TEARDOWN: __method_teardown(con, h); break;
                 case __METHOD_NONE:
-                    /* state DISCONNECTED connections should be garbage collected immediately.
-                       but sending thread might watches the connection right now.
-                       so the connection might live at here */
-                    if (con->con_state != __CON_S_DISCONNECTED) {
-                        ERR("unexpected empty request, forcing disconnect\n");
-                        con->con_state = __CON_S_DISCONNECTED;
-                    }
+                    /* a complete request without an RTSP method: drop the connection
+                       (it is still attached here, see the EOF check above) */
+                    ERR("unexpected empty request, forcing disconnect\n");
+                    con->con_state = __CON_S_DISCONNECTED;
                     ASSERT(bufpool_detach(con->pool, con) == SUCCESS, ERR("connection detach failed\n"));
                     break;
                 default: ERR("unexpected method state\n"); return FAILURE;
@@ -586,7 +590,7 @@ __connection_list_add(bufpool_handle con_pool, struct list_head_t *head, int fd,
 
     struct connection_item_t *p = NULL;
 
-    ASSERT(bufpool_get_free(con_pool, &p) == SUCCESS, return FAILURE);
+    ASSERT(bufpool_get_free(con_pool, &p) == SUCCESS, ({ close(fd); return FAILURE; }));
 
     DASSERT(p, return FAILURE);
 
@@ -801,9 +805,10 @@ static inline int __accept_proc_sock(rtsp_handle h, int server_fd, struct sock_s
                 setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sz, sizeof(sz));
         }
 
-        /* update connection-list exclusively */
-        ASSERT(__connection_list_add(h->con_pool, &h->con_list, fd, from_addr) == SUCCESS,
-                return FAILURE);
+        /* update connection-list exclusively. A full pool refuses this client
+           only (its socket is closed), it must not stop the RTSP thread. */
+        if (__connection_list_add(h->con_pool, &h->con_list, fd, from_addr) != SUCCESS)
+            ERR("cannot take connection from %s, closed\n", inet_ntoa(from_addr.sin_addr));
     }
 
     return SUCCESS;
