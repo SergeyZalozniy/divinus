@@ -55,6 +55,11 @@ This document describes the fields that can be found within a configuration file
 - **auth_user**: Username for ONVIF authentication (default: `admin`).
 - **auth_pass**: Password for ONVIF authentication (default: `12345`).
 
+With `enable` the device answers WS-Discovery probes (UDP multicast 239.255.255.250:3702) with a ProbeMatch whose
+scopes carry `name/<hostname>`, `hardware/Divinus` and `macaddress/<MAC of the first interface>`, and XAddrs
+`http://<ip>:<web_port>/onvif/device_service`. GetStreamUri / GetSnapshotUri put the RTSP / web credentials into the
+returned URI only when `enable_auth` is on (the request was authenticated), never for an anonymous client.
+
 ## RTSP section
 
 - **enable**: Boolean to activate the integrated RTSP server (default: `true`).

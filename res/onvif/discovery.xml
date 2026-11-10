@@ -13,7 +13,7 @@
           <wsa:Address>%s</wsa:Address>
         </wsa:EndpointReference>
         <d:Types>dn:NetworkVideoTransmitter</d:Types>
-        <d:Scopes>onvif://www.onvif.org/type/video_encoder onvif://www.onvif.org/Profile/Streaming onvif://www.onvif.org/name/%s onvif://www.onvif.org/hardware/Divinus</d:Scopes>
+        <d:Scopes>onvif://www.onvif.org/type/video_encoder onvif://www.onvif.org/Profile/Streaming onvif://www.onvif.org/name/%s onvif://www.onvif.org/hardware/Divinus%s%s</d:Scopes>
         <d:XAddrs>%s</d:XAddrs>
         <d:MetadataVersion>1</d:MetadataVersion>
       </d:ProbeMatch>

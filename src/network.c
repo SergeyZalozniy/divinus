@@ -64,6 +64,12 @@ void network_address(char *address) {
     pthread_mutex_unlock(&netinfoLock);
 }
 
+void network_interface(char *intf) {
+    pthread_mutex_lock(&netinfoLock);
+    memcpy(intf, netinfo.intf[0], sizeof(*netinfo.intf));
+    pthread_mutex_unlock(&netinfoLock);
+}
+
 static void *network_watch(void) {
     while (watching && keepRunning) {
         for (int i = 0; i < 5 && watching && keepRunning; i++)

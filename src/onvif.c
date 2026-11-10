@@ -45,6 +45,35 @@ void stop_onvif(void) {
     pthread_join(onvifPid, NULL);
 }
 
+/* Scope path segment: keep RFC 3986 unreserved characters, percent-encode the rest */
+static void onvif_scope_escape(char *dst, size_t size, const char *src) {
+    static const char hex[] = "0123456789ABCDEF";
+    size_t n = 0;
+    for (; *src && n + 4 <= size; src++) {
+        unsigned char c = *src;
+        if (isalnum(c) || c == '-' || c == '.' || c == '_' || c == '~') {
+            dst[n++] = c;
+        } else {
+            dst[n++] = '%';
+            dst[n++] = hex[c >> 4];
+            dst[n++] = hex[c & 15];
+        }
+    }
+    dst[n] = '\0';
+}
+
+static void onvif_read_mac(const char *intf, char *mac, size_t size) {
+    char path[64];
+    FILE *f;
+    *mac = '\0';
+    if (EMPTY(intf)) return;
+    snprintf(path, sizeof(path), "/sys/class/net/%s/address", intf);
+    if (!(f = fopen(path, "r"))) return;
+    if (!fgets(mac, size, f)) *mac = '\0';
+    fclose(f);
+    mac[strcspn(mac, " \r\n")] = '\0';
+}
+
 void *onvif_thread(void) {
     struct ifaddrs *ifaddr, *ifa;
     char request[4096], response[4096];
@@ -97,7 +126,7 @@ void *onvif_thread(void) {
         } else if (!ret) continue;
 
         clntsz = sizeof(clntaddr);
-        if ((reqLen = recvfrom(servfd, request, sizeof(request), 0, (struct sockaddr *)&clntaddr, &clntsz)) < 0)
+        if ((reqLen = recvfrom(servfd, request, sizeof(request) - 1, 0, (struct sockaddr *)&clntaddr, &clntsz)) < 0)
             continue;
 
         request[reqLen] = '\0';
@@ -108,15 +137,20 @@ void *onvif_thread(void) {
         if (!CONTAINS(request, "http://schemas.xmlsoap.org/ws/2005/04/discovery/Probe"))
             continue;
 
-        char device_name[64], device_uuid[64], device_url[128], msgid[100];
+        char device_name[64], device_uuid[64], device_url[128], msgid[100] = "";
         {
             char uuid[37];
             uuid_generate(uuid);
             snprintf(device_uuid, sizeof(device_uuid), "urn:uuid:%s", uuid);
         }
-        snprintf(device_name, sizeof(device_name), "Divinus");
-        char address[INET_ADDRSTRLEN];
+        /* name/ carries the hostname and macaddress/ the MAC, so that a
+           scanner can label the camera and match it to an ARP entry */
+        onvif_scope_escape(device_name, sizeof(device_name),
+            EMPTY(netinfo.host) ? "Divinus" : netinfo.host);
+        char address[INET_ADDRSTRLEN], intf[16], mac[18] = "";
         network_address(address);
+        network_interface(intf);
+        onvif_read_mac(intf, mac, sizeof(mac));
         snprintf(device_url, sizeof(device_url), "http://%s:%d/onvif/device_service",
             address, app_config.web_port);
     
@@ -131,7 +165,8 @@ void *onvif_thread(void) {
         }
         
         int respLen = snprintf(response, sizeof(response), discoveryxml,
-            device_uuid, msgid, device_uuid, device_name, device_url);
+            device_uuid, msgid, device_uuid, device_name,
+            *mac ? " onvif://www.onvif.org/macaddress/" : "", mac, device_url);
     
         HAL_INFO("onvif", "Sending discovery response to %s:%d\n", 
                  inet_ntoa(clntaddr.sin_addr), ntohs(clntaddr.sin_port));
@@ -190,9 +225,11 @@ bool onvif_validate_soap_auth(const char *soap_data) {
     char *pos, *end, *start;
     char digest = 0, created[64], nonce[64], pass[64], user[64];
 
+    /* every field is copied into a fixed buffer: longer ones are rejected */
+
     if (!(start = strstr(soap_data, user_tag)) ||
         !(start += strlen(user_tag))) return false;
-    if (!(end = strstr(start, "</Username>"))) return false;
+    if (!(end = strstr(start, "</Username>")) || end - start >= sizeof(user)) return false;
     memcpy(user, start, end - start);
     user[end - start] = '\0';
 
@@ -205,8 +242,8 @@ bool onvif_validate_soap_auth(const char *soap_data) {
         !(start += strlen(pass_tag))) return false;
     if ((pos = strstr(start, type_attr)) < (start = strchr(start, '>')) &&
         (pos += strlen(type_attr)) && strstr(pos, digest_tag)) digest = 1;
-    if (!(end = strstr(start, "</Password>"))) return false;
-    memcpy(pass, ++start, end - start);
+    if (!start || !(end = strstr(start, "</Password>")) || end - ++start >= sizeof(pass)) return false;
+    memcpy(pass, start, end - start);
     pass[end - start] = '\0';
 
     if (digest) {
@@ -215,13 +252,13 @@ bool onvif_validate_soap_auth(const char *soap_data) {
 
         if (!(start = strstr(soap_data, nonce_tag)) ||
             !(start = strchr(start, '>'))) return false;
-        if (!(end = strstr(++start, "</Nonce>"))) return false;
+        if (!(end = strstr(++start, "</Nonce>")) || end - start >= sizeof(nonce)) return false;
         memcpy(nonce, start, end - start);
         nonce[end - start] = '\0';
 
         if (!(start = strstr(soap_data, created_tag)) ||
             !(start = strchr(start, '>'))) return false;
-        if (!(end = strstr(++start, "</Created>"))) return false;
+        if (!(end = strstr(++start, "</Created>")) || end - start >= sizeof(created)) return false;
         memcpy(created, start, end - start);
         created[end - start] = '\0';
 
@@ -334,7 +371,9 @@ void onvif_respond_snapshot(char *response, int *respLen) {
     char address[INET_ADDRSTRLEN];
     network_address(address);
 
-    if (app_config.web_enable_auth && 
+    /* the credentials go into the URI only for an authenticated ONVIF
+       request (onvif.enable_auth), never to an anonymous LAN client */
+    if (app_config.onvif_enable_auth && app_config.web_enable_auth &&
         *app_config.web_auth_user && *app_config.web_auth_pass) {
         char user[96], pass[96];
         escape_url(user, app_config.web_auth_user, sizeof(user));
@@ -362,7 +401,8 @@ void onvif_respond_stream(char *response, int *respLen) {
     char address[INET_ADDRSTRLEN];
     network_address(address);
 
-    if (app_config.rtsp_enable_auth && 
+    /* see onvif_respond_snapshot(): credentials only with onvif.enable_auth */
+    if (app_config.onvif_enable_auth && app_config.rtsp_enable_auth &&
         *app_config.rtsp_auth_user && *app_config.rtsp_auth_pass) {
         char user[96], pass[96];
         escape_url(user, app_config.rtsp_auth_user, sizeof(user));
